@@ -29,6 +29,10 @@ pub fn ui_menu_panel(
 
     mut app_exit_events: EventWriter<AppExit>,
 ) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
     // const BLUE: Color = Color::rgb(0.188, 0.478, 0.776);
     // const PURPLE: Color = Color::rgb(0.373, 0.157, 0.467);
     // const ORANGE: Color = Color::rgb(0.741, 0.345, 0.133);
@@ -45,7 +49,7 @@ pub fn ui_menu_panel(
         .frame(Frame::default().fill(bg))
         .show_separator_line(false)
         // .height_range(Rangef::new(16., 16.))  // 24
-        .show(ctx.ctx_mut().unwrap(), |ui| {
+        .show(ctx_mut, |ui| {
             // ui.painter().text([0., 48.].into(), Align2::LEFT_TOP, "SomeText", FontId::default(), Color32::WHITE);
 
             egui::menu::bar(ui, |ui| {
@@ -65,7 +69,9 @@ pub fn ui_menu_panel(
                     if let Some(net_transport) = net_transport {
                         let cli = cl.data();
 
-                        let net_client = net_client.unwrap();
+                        let Some(net_client) = net_client else {
+                            return;
+                        };
                         if net_client.is_connected() {
                             use human_bytes::human_bytes;
                             let ni = net_client.network_info();

@@ -99,8 +99,12 @@ pub fn input_handle(
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,
 ) {
-    let action_state = query_input.single().unwrap();
-    let mut window = query_window.single_mut().unwrap();
+    let Ok(action_state) = query_input.single() else {
+        return;
+    };
+    let Ok(mut window) = query_window.single_mut() else {
+        return;
+    };
 
     // ESC
     if action_state.just_pressed(&InputAction::ESC) {
@@ -135,9 +139,9 @@ pub fn input_handle(
 
     if curr_manipulating && !key.pressed(KeyCode::AltLeft) && player.is_some() {
         let wheel_delta = mouse_wheel_events.read().fold(0.0, |acc, v| acc + v.x + v.y);
-        let mut player = player.unwrap();
-
-        player.hotbar_index = (player.hotbar_index as i32 + -wheel_delta as i32).rem_euclid(ClientPlayerInfo::HOTBAR_SLOTS as i32) as u32;
+        if let Some(mut player) = player {
+            player.hotbar_index = (player.hotbar_index as i32 + -wheel_delta as i32).rem_euclid(ClientPlayerInfo::HOTBAR_SLOTS as i32) as u32;
+        }
     }
 
     // Temporary F4 Debug Settings

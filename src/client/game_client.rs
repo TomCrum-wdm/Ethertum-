@@ -188,7 +188,8 @@ impl Default for ClientInfo {
             server_addr: String::new(),
 
             dbg_text: false,
-            dbg_menubar: true,
+            // On Android, menu bar debug UI is disabled by default to avoid startup-time UI context assumptions.
+            dbg_menubar: !cfg!(target_os = "android"),
             dbg_inspector: false,
             dbg_gizmo_remesh_chunks: true,
             dbg_gizmo_curr_chunk: false,
