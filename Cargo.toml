@@ -9,6 +9,7 @@ default = ["target_native_os"]
 target_native_os = [
     "dep:bevy_atmosphere",
     "dep:bevy_editor_pls",
+    "dep:bevy-inspector-egui",
     "dep:native-dialog",
     "dep:memory-stats",
     "dep:sysinfo",
@@ -35,16 +36,14 @@ bevy_renet = "3.0"
 
 #bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
 #bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
-bevy_egui = "0.38"
-bevy-inspector-egui = "0.34"
+bevy_egui = { version = "0.38", default-features = false, features = ["open_url", "default_fonts"] }
+bevy-inspector-egui = { version = "0.34", optional = true }
 bevy_editor_pls = { version = "0.10", optional = true }
-bevy_touch_stick = { version = "0.2" }
 egui_extras = { version = "0.33", default-features = false, features = [] }
 egui-notify = "0.21"
 leafwing-input-manager = { version = "0.18" }
 
 bevy_atmosphere = { version = "0.13", optional = true }
-bevy_mod_billboard = "0.7"
 bevy_common_assets = { version = "0.14", features = ["json"] }
 bevy_obj = "0.17"
 
@@ -105,4 +104,4 @@ opt-level = "z"  # default=39.2mb, "z"=17.3mb,
 
 [profile.android-debug]
 inherits = "dev"
-opt-level = 3
+opt-level = 1

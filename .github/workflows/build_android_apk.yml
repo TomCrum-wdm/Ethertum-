@@ -52,7 +52,7 @@ jobs:
           export ANDROID_HOME="${ANDROID_SDK_ROOT}"
           export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/26.3.11579264"
           export NDK_HOME="${ANDROID_NDK_ROOT}"
-          cargo apk build --profile android-debug --package mobile
+          cargo apk build --profile android-debug --package mobile --no-default-features --features bevy/jpeg,bevy/bevy_solari
 
       - name: Verify APK Build Output
         run: |
