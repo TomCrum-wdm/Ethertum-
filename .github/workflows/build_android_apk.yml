@@ -1,0 +1,109 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Dependencies
+        run: |
+          rustup target add aarch64-linux-android
+          cargo install --force cargo-apk
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools-version: 36.0.0
+          ndk-version: 26.3.11579264
+
+      - name: Create Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "C=US, O=Android, CN=Android Debug"
+
+      - name: Build APK (Debug)
+        run: |
+          export ANDROID_HOME="${ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/26.3.11579264"
+          export NDK_HOME="${ANDROID_NDK_ROOT}"
+          cargo apk build --profile android-debug --package mobile
+
+      - name: Verify APK Build Output
+        run: |
+          echo "Checking APK files in target directory..."
+          find target/android-debug/apk/ -type f -name "*.apk" -o -name "*unaligned*"
+          ls -lah target/android-debug/apk/ || ls -lah target/release/apk/ || echo "No APK directory found"
+
+      - name: Sign and Align APK
+        run: |
+          ZIPALIGN="${ANDROID_SDK_ROOT}/build-tools/36.0.0/zipalign"
+          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/36.0.0/apksigner"
+          
+          # Check both possible locations for unaligned APK
+          UNALIGNED=""
+          if [ -f "target/android-debug/apk/ethertia-unaligned.apk" ]; then
+            UNALIGNED="target/android-debug/apk/ethertia-unaligned.apk"
+          elif [ -f "target/release/apk/ethertia-unaligned.apk" ]; then
+            UNALIGNED="target/release/apk/ethertia-unaligned.apk"
+          else
+            echo "ERROR: No unaligned APK found!"
+            exit 1
+          fi
+          
+          ALIGNED="${UNALIGNED%/*}/ethertia-aligned.apk"
+          FINAL="${UNALIGNED%/*}/ethertia-debug.apk"
+          
+          echo "Processing: $UNALIGNED"
+          echo "Output: $FINAL"
+          
+          "$ZIPALIGN" -f -v 4 "$UNALIGNED" "$ALIGNED"
+          "$APKSIGNER" sign --ks ~/.android/debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$FINAL" "$ALIGNED"
+          "$APKSIGNER" verify --verbose "$FINAL"
+          
+          ls -lah "$FINAL"
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: |
+            target/android-debug/apk/ethertia-debug.apk
+            target/release/apk/ethertia-debug.apk
+          if-no-files-found: warn
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/android-debug/apk/ethertia-debug.apk
+            target/release/apk/ethertia-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
