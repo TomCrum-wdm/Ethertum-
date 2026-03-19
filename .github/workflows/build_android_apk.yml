@@ -34,7 +34,10 @@ jobs:
         with:
           api-level: 34
           build-tools-version: 36.0.0
-          ndk-version: 26.3.11579264
+
+      - name: Install Android NDK
+        run: |
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager "ndk;26.3.11579264"
 
       - name: Create Debug Keystore
         run: |
