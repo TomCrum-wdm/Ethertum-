@@ -36,7 +36,7 @@ bevy_renet = "3.0"
 
 #bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
 #bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
-bevy_egui = { version = "0.38", default-features = false, features = ["open_url", "default_fonts"] }
+bevy_egui = "0.38"
 bevy-inspector-egui = { version = "0.34", optional = true }
 bevy_editor_pls = { version = "0.10", optional = true }
 egui_extras = { version = "0.33", default-features = false, features = [] }

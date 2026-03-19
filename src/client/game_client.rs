@@ -79,6 +79,7 @@ impl Plugin for ClientGamePlugin {
             app.add_systems(PostUpdate, debug_draw_gizmo.in_set(PhysicsSet::Writeback).run_if(condition::in_world));
             
             // World Inspector
+            #[cfg(feature = "bevy-inspector-egui")]
             app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new().run_if(|cli: Res<ClientInfo>| cli.dbg_inspector));
         }
 

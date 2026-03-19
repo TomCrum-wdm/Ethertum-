@@ -9,7 +9,7 @@ name = "mobile"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-bevy = { version = "0.17", default-features = false, features = ["bevy_render", "bevy_window", "jpeg", "bevy_solari", "bevy_state", "bevy_core_pipeline", "bevy_asset", "bevy_scene", "bevy_animation", "bevy_audio", "bevy_pbr", "multi_threaded"] }
+bevy = { version = "0.17" }
 ethertia = { path = "../..", default-features = false }
 
 [package.metadata.android]
