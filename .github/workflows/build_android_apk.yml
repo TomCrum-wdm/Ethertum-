@@ -16,6 +16,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUST_LOG: debug
 
 jobs:
   build-android:
@@ -71,10 +72,11 @@ jobs:
 
       - name: Build APK (Debug)
         run: |
+          set -euxo pipefail
           export ANDROID_HOME="${ANDROID_SDK_ROOT}"
           export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/26.3.11579264"
           export NDK_HOME="${ANDROID_NDK_ROOT}"
-          cargo apk build --profile android-debug --package mobile
+          cargo apk build --profile android-debug --package mobile 2>&1 | tee /tmp/ethertia-build.log
 
       - name: Verify APK Build Output
         run: |
@@ -136,6 +138,7 @@ jobs:
             sleep 12
 
             adb logcat -d > /tmp/ethertia-logcat.txt
+            grep -E "FATAL EXCEPTION|SIGSEGV|panic|PANIC|Abort message|AndroidRuntime" /tmp/ethertia-logcat.txt > /tmp/ethertia-logcat-crash.txt || true
             adb shell pidof -s com.ethertia.client > /tmp/ethertia-pid.txt || true
 
             if ! test -s /tmp/ethertia-pid.txt; then
@@ -151,13 +154,90 @@ jobs:
 
             echo "Smoke test passed: app launched and stayed alive."
 
+      - name: Collect Build Diagnostics
+        if: always()
+        run: |
+          set +e
+          mkdir -p /tmp/ethertia-debug
+
+          # Base environment and toolchain snapshot
+          uname -a > /tmp/ethertia-debug/uname.txt
+          rustc -Vv > /tmp/ethertia-debug/rustc-version.txt
+          cargo -V > /tmp/ethertia-debug/cargo-version.txt
+          cargo apk --version > /tmp/ethertia-debug/cargo-apk-version.txt 2>&1
+          env | sort | grep -E 'ANDROID|RUST|CARGO|NDK|JAVA' > /tmp/ethertia-debug/env-android-rust.txt || true
+
+          # Persist full build log when available
+          if [ -f /tmp/ethertia-build.log ]; then
+            cp /tmp/ethertia-build.log /tmp/ethertia-debug/build.log
+          fi
+
+          # Collect APK and output layout information
+          find target -maxdepth 5 -type f \( -name '*.apk' -o -name '*.so' -o -name '*unaligned*' \) | sort > /tmp/ethertia-debug/target-files.txt || true
+          ls -R target/android-debug/apk > /tmp/ethertia-debug/apk-dir-tree.txt 2>&1 || true
+          ls -R target/release/apk > /tmp/ethertia-debug/apk-dir-tree-release.txt 2>&1 || true
+
+          APK="target/android-debug/apk/ethertia-debug.apk"
+          if [ ! -f "$APK" ]; then
+            APK="target/release/apk/ethertia-debug.apk"
+          fi
+
+          if [ -f "$APK" ]; then
+            unzip -l "$APK" > /tmp/ethertia-debug/apk-contents.txt 2>&1 || true
+          fi
+
+          # Native library metadata helps diagnose strip/symbol issues
+          find target -type f -name 'libmobile.so' > /tmp/ethertia-debug/libmobile-locations.txt 2>&1 || true
+          LIB_SO=$(head -n 1 /tmp/ethertia-debug/libmobile-locations.txt)
+          if [ -n "$LIB_SO" ] && [ -f "$LIB_SO" ]; then
+            file "$LIB_SO" > /tmp/ethertia-debug/libmobile-file.txt 2>&1 || true
+            readelf -h "$LIB_SO" > /tmp/ethertia-debug/libmobile-elf-header.txt 2>&1 || true
+          fi
+
+      - name: Upload Build Diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-diagnostics
+          path: /tmp/ethertia-debug
+          if-no-files-found: warn
+
+      - name: Upload Raw Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-log
+          path: /tmp/ethertia-build.log
+          if-no-files-found: warn
+
       - name: Upload Smoke Test Logcat
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: android-smoke-logcat
-          path: /tmp/ethertia-logcat.txt
+          path: |
+            /tmp/ethertia-logcat.txt
+            /tmp/ethertia-logcat-crash.txt
+            /tmp/ethertia-pid.txt
           if-no-files-found: warn
+
+      - name: Write Diagnostic Summary
+        if: always()
+        run: |
+          {
+            echo "## Android CI Diagnostics"
+            echo ""
+            echo "- Build log artifact: android-build-log"
+            echo "- Diagnostic bundle: android-build-diagnostics"
+            echo "- Smoke logcat artifact: android-smoke-logcat"
+            echo ""
+            echo "### Smoke Test"
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.smoke_test }}" = "true" ]; then
+              echo "Smoke test was requested in this run."
+            else
+              echo "Smoke test was not requested for this run. Trigger workflow_dispatch with smoke_test=true to collect runtime crash logs."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
