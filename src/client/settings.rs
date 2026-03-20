@@ -1,14 +1,32 @@
 // ClientSettings Configs
 
 use crate::prelude::*;
+use std::path::PathBuf;
 
 pub const CLIENT_SETTINGS_FILE: &str = "client.settings.json";
 
+fn client_settings_path() -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(CLIENT_SETTINGS_FILE);
+        }
+    }
+
+    PathBuf::from(CLIENT_SETTINGS_FILE)
+}
+
 fn on_app_init(mut cfg: ResMut<ClientSettings>) {
-    info!("Loading {CLIENT_SETTINGS_FILE}");
-    if let Ok(str) = std::fs::read_to_string(CLIENT_SETTINGS_FILE) {
-        if let Ok(val) = serde_json::from_str(&str) {
-            *cfg = val;
+    let cfg_path = client_settings_path();
+    info!("Loading {}", cfg_path.display());
+    match std::fs::read_to_string(&cfg_path) {
+        Ok(str) => {
+            if let Ok(val) = serde_json::from_str(&str) {
+                *cfg = val;
+            }
+        }
+        Err(err) => {
+            debug!("Skip loading {}: {err}", cfg_path.display());
         }
     }
 }
@@ -17,8 +35,16 @@ fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<Client
     for _ in exit_events.read() {
         info!("Program Terminate");
 
-        info!("Saving {CLIENT_SETTINGS_FILE}");
-        std::fs::write(CLIENT_SETTINGS_FILE, serde_json::to_string_pretty(&*cfg).unwrap()).unwrap();
+        let cfg_path = client_settings_path();
+        info!("Saving {}", cfg_path.display());
+        match serde_json::to_string_pretty(&*cfg) {
+            Ok(content) => {
+                if let Err(err) = std::fs::write(&cfg_path, content) {
+                    warn!("Failed to save {}: {err}", cfg_path.display());
+                }
+            }
+            Err(err) => warn!("Failed to serialize {}: {err}", cfg_path.display()),
+        }
     }
 }
 

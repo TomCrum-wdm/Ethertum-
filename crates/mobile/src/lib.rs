@@ -30,9 +30,9 @@ fn main() {
 
     #[cfg(target_os = "android")]
     {
-        // Prefer GLES on Android/emulators to avoid Vulkan-driver startup crashes.
-        std::env::set_var("WGPU_BACKEND", "gl");
-        boot_log("set WGPU_BACKEND=gl");
+        // Follow project default rendering path: force Vulkan on Android.
+        std::env::set_var("WGPU_BACKEND", "vulkan");
+        boot_log("set WGPU_BACKEND=vulkan");
     }
 
     #[cfg(target_os = "android")]

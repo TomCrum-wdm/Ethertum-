@@ -19,8 +19,6 @@ pub struct ClientGamePlugin;
 
 impl Plugin for ClientGamePlugin {
     fn build(&self, app: &mut App) {
-        let android_safe_boot = cfg!(target_os = "android");
-
         // Render
         {
             // Atmosphere
@@ -50,31 +48,22 @@ impl Plugin for ClientGamePlugin {
             // app.insert_resource(AmbientLight { brightness: 0.05, ..default() });
         }
         // .obj model loader.
-        #[cfg(not(target_os = "android"))]
-        {
-            app.add_plugins(bevy_obj::ObjPlugin);
-            app.insert_resource(GlobalVolume::new(bevy::audio::Volume::Linear(1.0))); // Audio GlobalVolume
-        }
+        app.add_plugins(bevy_obj::ObjPlugin);
+        app.insert_resource(GlobalVolume::new(bevy::audio::Volume::Linear(1.0))); // Audio GlobalVolume
         
         // Physics
-        if !android_safe_boot {
-            app.add_plugins(PhysicsPlugins::default());
-        }
+        app.add_plugins(PhysicsPlugins::default());
         
         // UI
         app.add_plugins(crate::ui::UiPlugin);
         
         // Gameplay
-        if !android_safe_boot {
-            app.add_plugins(CharacterControllerPlugin); // CharacterController
-            app.add_plugins(ClientVoxelPlugin); // Voxel
-            app.add_plugins(ItemPlugin); // Items
-        }
+        app.add_plugins(CharacterControllerPlugin); // CharacterController
+        app.add_plugins(ClientVoxelPlugin); // Voxel
+        app.add_plugins(ItemPlugin); // Items
         
         // Network
-        if !android_safe_boot {
-            app.add_plugins(ClientNetworkPlugin); // Client Network
-        }
+        app.add_plugins(ClientNetworkPlugin); // Client Network
         #[cfg(not(target_os = "android"))]
         app.add_plugins(IntegratedServerPlugin);
         
@@ -86,18 +75,14 @@ impl Plugin for ClientGamePlugin {
         super::input::init(app); // Input
         
         // World
-        if !android_safe_boot {
-            super::client_world::init(app);
-        }
+        super::client_world::init(app);
 
         // Debug
         {
             // app.add_systems(Update, wfc_test);
             
             // Draw Basis
-            if !android_safe_boot {
-                app.add_systems(PostUpdate, debug_draw_gizmo.in_set(PhysicsSet::Writeback).run_if(condition::in_world));
-            }
+            app.add_systems(PostUpdate, debug_draw_gizmo.in_set(PhysicsSet::Writeback).run_if(condition::in_world));
             
             // World Inspector
             #[cfg(feature = "bevy-inspector-egui")]
