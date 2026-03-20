@@ -59,7 +59,11 @@ pub fn ui_settings(
     // mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let is_world_loaded = worldinfo.is_some();
-    new_egui_window("Settings").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("Settings").show(ctx_mut, |ui| {
         let curr_settings_panel = *settings_panel;
 
         ui_lr_panel(

@@ -83,8 +83,39 @@ impl Plugin for ClientGamePlugin {
             app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new().run_if(|cli: Res<ClientInfo>| cli.dbg_inspector));
         }
 
+        #[cfg(target_os = "android")]
+        app.add_systems(Update, handle_android_lifecycle);
+
         #[cfg(feature = "ddgi")]
         app.add_plugins(DDGIPlugin);
+    }
+}
+
+#[cfg(target_os = "android")]
+fn handle_android_lifecycle(
+    mut lifecycle_events: MessageReader<bevy::window::AppLifecycle>,
+    mut cli: ResMut<ClientInfo>,
+    mut worldinfo: Option<ResMut<WorldInfo>>,
+) {
+    for event in lifecycle_events.read() {
+        match event {
+            bevy::window::AppLifecycle::WillSuspend | bevy::window::AppLifecycle::Suspended => {
+                if let Some(world) = &mut worldinfo {
+                    world.is_paused = true;
+                }
+                // Ensure app returns to a stable UI state when resuming from background.
+                if cli.curr_ui == CurrentUI::None {
+                    cli.curr_ui = CurrentUI::PauseMenu;
+                }
+                cli.enable_cursor_look = false;
+            }
+            bevy::window::AppLifecycle::WillResume => {
+                if cli.curr_ui == CurrentUI::None {
+                    cli.curr_ui = CurrentUI::PauseMenu;
+                }
+            }
+            _ => {}
+        }
     }
 }
 

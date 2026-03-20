@@ -5,6 +5,8 @@ mod main_menu;
 pub mod serverlist;
 mod settings;
 
+use std::sync::Mutex;
+
 pub mod prelude {
     pub use super::items::{ui_inventory, ui_item_stack};
     pub use super::sfx_play;
@@ -154,8 +156,29 @@ pub enum CurrentUI {
     LocalWorldNew,
 }
 
-// for fn new_egui_window
-pub static mut _WINDOW_SIZE: Vec2 = Vec2::ZERO;
+// Shared UI runtime state that may be touched from multiple systems.
+static UI_WINDOW_SIZE: Mutex<Vec2> = Mutex::new(Vec2::ZERO);
+
+#[derive(Default)]
+struct UiSfxState {
+    hovered_id: egui::Id,
+    last_hovered_id: egui::Id,
+    clicked: bool,
+    back_requested: bool,
+}
+
+static UI_SFX_STATE: Mutex<UiSfxState> = Mutex::new(UiSfxState {
+    hovered_id: egui::Id::NULL,
+    last_hovered_id: egui::Id::NULL,
+    clicked: false,
+    back_requested: false,
+});
+
+pub fn set_window_size(size: Vec2) {
+    if let Ok(mut v) = UI_WINDOW_SIZE.lock() {
+        *v = size;
+    }
+}
 
 pub fn new_egui_window(title: &str) -> egui::Window {
     let size = [680., 420.];
@@ -167,7 +190,7 @@ pub fn new_egui_window(title: &str) -> egui::Window {
         .anchor(Align2::CENTER_CENTER, [0., 0.])
         .collapsible(false);
 
-    let window_size = unsafe { _WINDOW_SIZE };
+    let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
     if window_size.x - size[0] < 100. || window_size.y - size[1] < 100. {
         w = w.fixed_size([window_size.x - 12., window_size.y - 12.]).resizable(false);
     }
@@ -358,13 +381,6 @@ fn ui_example_system(
     Ok(())
 }
 
-// for SFX
-static mut SFX_BTN_HOVERED_ID: egui::Id = egui::Id::NULL;
-static mut SFX_BTN_CLICKED: bool = false;
-
-// for ui_panel_lr set curr_ui Back without accessing UI Res
-static mut UI_BACK: bool = false;
-
 fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
     // if !*limbo_played {
     //     *limbo_played = true;
@@ -383,27 +399,26 @@ fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played
     //     });
     // }
 
-    unsafe {
-        static mut LAST_HOVERED_ID: egui::Id = egui::Id::NULL;
-        if SFX_BTN_HOVERED_ID != egui::Id::NULL && SFX_BTN_HOVERED_ID != LAST_HOVERED_ID {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+        if sfx_state.hovered_id != egui::Id::NULL && sfx_state.hovered_id != sfx_state.last_hovered_id {
             cmds.spawn(
                 AudioPlayer::<AudioSource>(asset_server.load("sounds/ui/button.ogg"))
                 //.with_settings(PlaybackSettings::DESPAWN),
             );
         }
-        LAST_HOVERED_ID = SFX_BTN_HOVERED_ID;
-        SFX_BTN_HOVERED_ID = egui::Id::NULL;
+        sfx_state.last_hovered_id = sfx_state.hovered_id;
+        sfx_state.hovered_id = egui::Id::NULL;
 
-        if SFX_BTN_CLICKED {
+        if sfx_state.clicked {
             cmds.spawn(
                 AudioPlayer::<AudioSource>(asset_server.load("sounds/ui/button_large.ogg"))
                 //.with_settings(PlaybackSettings::DESPAWN),
             );
         }
-        SFX_BTN_CLICKED = false;
+        sfx_state.clicked = false;
 
-        if UI_BACK {
-            UI_BACK = false;
+        if sfx_state.back_requested {
+            sfx_state.back_requested = false;
             cli.curr_ui = CurrentUI::MainMenu;
         }
     }
@@ -432,8 +447,8 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                     strip.cell(|ui| {
                         ui.with_layout(Layout::bottom_up(egui::Align::Min), |ui| {
                             if sfx_play(ui.selectable_label(false, "⬅Back")).clicked() {
-                                unsafe {
-                                    UI_BACK = true;
+                                if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+                                    sfx_state.back_requested = true;
                                 }
                             }
                         });
@@ -465,14 +480,12 @@ pub trait UiExtra {
 }
 
 pub fn sfx_play(resp: Response) -> Response {
-    if resp.hovered() || resp.gained_focus() {
-        unsafe {
-            SFX_BTN_HOVERED_ID = resp.id;
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+        if resp.hovered() || resp.gained_focus() {
+            sfx_state.hovered_id = resp.id;
         }
-    }
-    if resp.clicked() {
-        unsafe {
-            SFX_BTN_CLICKED = true;
+        if resp.clicked() {
+            sfx_state.clicked = true;
         }
     }
     resp

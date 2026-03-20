@@ -48,6 +48,10 @@ pub fn hud_chat(
     mut cli: ResMut<ClientInfo>, // only curr_ui
     mut net_client: ResMut<RenetClient>,
 ) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
     let has_new_chat = state.scrollback.len() > *last_chat_count;
     *last_chat_count = state.scrollback.len();
 
@@ -71,7 +75,7 @@ pub fn hud_chat(
         .collapsible(false)
         .anchor(Align2::LEFT_BOTTOM, [0., -100.])
         // .frame(Frame::default().fill(Color32::from_black_alpha(140)))
-        .show(ctx.ctx_mut().unwrap(), |ui| {
+        .show(ctx_mut, |ui| {
             ui.vertical(|ui| {
                 let scroll_height = ui.available_height() - 38.0;
 
@@ -192,6 +196,9 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
     mut voxbrush: ResMut<VoxelBrush>,
     // chunk_sys: Res<ClientChunkSystem>,
 ) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
 
     // new_egui_window("VoxBrush")
     //     .anchor(Align2::LEFT_BOTTOM, [cfg.hud_padding, -cfg.hud_padding])
@@ -215,7 +222,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
         .resizable(false)
         .anchor(Align2::CENTER_BOTTOM, [0., -cfg.hud_padding])
         .frame(Frame::default().fill(Color32::from_black_alpha(0)))
-        .show(ctx.ctx_mut().unwrap(), |ui| {
+        .show(ctx_mut, |ui| {
             // Health bar
             {
                 let health_bar_size = Vec2::new(250., 4.);
@@ -239,9 +246,9 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
 
             ui.horizontal(|ui| {
                 for i in 0..ClientPlayerInfo::HOTBAR_SLOTS {
-                    let item = player.inventory.items.get_mut(i as usize).unwrap();
-
-                    ui_item_stack(ui, item);
+                    if let Some(item) = player.inventory.items.get_mut(i as usize) {
+                        ui_item_stack(ui, item);
+                    }
                 }
             });
         });
@@ -262,11 +269,15 @@ pub fn hud_playerlist(
         net_client.send_packet(&CPacket::PlayerList);
     }
 
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
     egui::Window::new("PlayerList")
         .title_bar(false)
         .resizable(false)
         .anchor(Align2::CENTER_TOP, [0., cfg.hud_padding])
-        .show(ctx.ctx_mut().unwrap(), |ui| {
+        .show(ctx_mut, |ui| {
             for player in &cli.playerlist {
                 ui.horizontal(|ui| {
                     ui.set_width(280.);

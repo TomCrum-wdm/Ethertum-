@@ -1,23 +1,28 @@
 use bevy_egui::egui::Painter;
+use std::sync::Mutex;
 
 use crate::{
     item::{Inventory, ItemStack},
     ui::prelude::*,
 };
 
-pub fn ui_holding_item() -> &'static mut ItemStack {
-    static mut CURR_HOLD: ItemStack = ItemStack { count: 0, item_id: 0 };
-    unsafe { &mut CURR_HOLD }
-}
+static UI_HOLDING_ITEM: Mutex<ItemStack> = Mutex::new(ItemStack { count: 0, item_id: 0 });
 
 pub fn draw_ui_holding_item(mut ctx: EguiContexts) {
-    let hold = ui_holding_item();
+    let Ok(hold) = UI_HOLDING_ITEM.lock() else {
+        return;
+    };
 
     if !hold.is_empty() {
-        let curpos = ctx.ctx_mut().unwrap().pointer_latest_pos().unwrap();
+        let Ok(ctx_mut) = ctx.ctx_mut() else {
+            return;
+        };
+        let Some(curpos) = ctx_mut.pointer_latest_pos() else {
+            return;
+        };
         let size = vec2(50., 50.);
 
-        draw_item(&hold, Rect::from_min_size(curpos - size / 2., size), &ctx.ctx_mut().unwrap().debug_painter());
+        draw_item(&hold, Rect::from_min_size(curpos - size / 2., size), &ctx_mut.debug_painter());
     }
 }
 
@@ -68,10 +73,10 @@ pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack) {
         draw_item(slot, resp.rect, ui.painter())
     }
 
-    let hold = ui_holding_item();
-
     if resp.clicked() {
-        ItemStack::swap(hold, slot);
+        if let Ok(mut hold) = UI_HOLDING_ITEM.lock() {
+            ItemStack::swap(&mut hold, slot);
+        }
     } else if resp.secondary_clicked() {
         crate::util::as_mut(slot).count += 1;
         crate::util::as_mut(slot).item_id += 1;

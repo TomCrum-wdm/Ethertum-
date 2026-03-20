@@ -179,9 +179,7 @@ pub fn input_handle(
     // Vsync
     window.present_mode = if cfg.vsync { PresentMode::AutoVsync } else { PresentMode::AutoNoVsync };
 
-    unsafe {
-        crate::ui::_WINDOW_SIZE = Vec2::new(window.resolution.width(), window.resolution.height());
-    }
+    crate::ui::set_window_size(Vec2::new(window.resolution.width(), window.resolution.height()));
 }
 
 // // TouchStick  Move-Left
