@@ -159,12 +159,22 @@ pub enum CurrentUI {
 // Shared UI runtime state that may be touched from multiple systems.
 static UI_WINDOW_SIZE: Mutex<Vec2> = Mutex::new(Vec2::ZERO);
 
-#[derive(Default)]
 struct UiSfxState {
     hovered_id: egui::Id,
     last_hovered_id: egui::Id,
     clicked: bool,
     back_requested: bool,
+}
+
+impl Default for UiSfxState {
+    fn default() -> Self {
+        Self {
+            hovered_id: egui::Id::NULL,
+            last_hovered_id: egui::Id::NULL,
+            clicked: false,
+            back_requested: false,
+        }
+    }
 }
 
 static UI_SFX_STATE: Mutex<UiSfxState> = Mutex::new(UiSfxState {
