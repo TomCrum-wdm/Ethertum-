@@ -29,6 +29,13 @@ fn main() {
     boot_log("mobile::main entered");
 
     #[cfg(target_os = "android")]
+    {
+        // Prefer GLES on Android/emulators to avoid Vulkan-driver startup crashes.
+        std::env::set_var("WGPU_BACKEND", "gl");
+        boot_log("set WGPU_BACKEND=gl");
+    }
+
+    #[cfg(target_os = "android")]
     std::panic::set_hook(Box::new(|info| {
         boot_log(&format!("panic: {}", info));
         eprintln!("PANIC: {}", info);
