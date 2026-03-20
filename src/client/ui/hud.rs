@@ -172,8 +172,9 @@ pub fn hud_chat(
                     && state.history_index < state.history.len() - 1
                 {
                     if state.history_index == 0 && !state.buf.trim().is_empty() {
+                        let current_buf = state.buf.clone();
                         if let Some(entry) = state.history.get_mut(0) {
-                            *entry = state.buf.clone();
+                            *entry = current_buf;
                         }
                     }
 
