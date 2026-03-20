@@ -14,7 +14,7 @@ ethertia = { path = "../..", default-features = false }
 
 [package.metadata.android]
 package = "com.ethertia.client"
-build_targets = ["aarch64-linux-android"]
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
 resources = "../../build/android/res"
 assets = "../../assets"
 apk_name = "ethertia"
