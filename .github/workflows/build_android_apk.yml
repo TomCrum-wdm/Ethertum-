@@ -24,10 +24,22 @@ jobs:
         with:
           targets: aarch64-linux-android
 
+      - name: Cache Rust Build Artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/mobile -> target
+          cache-on-failure: true
+
       - name: Install Dependencies
         run: |
           rustup target add aarch64-linux-android
-          cargo install --force cargo-apk
+          if ! command -v cargo-apk >/dev/null 2>&1; then
+            cargo install cargo-apk
+          else
+            echo "cargo-apk already installed, skipping"
+          fi
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
