@@ -150,6 +150,8 @@ jobs:
             adb shell am start -W com.ethertia.client/android.app.NativeActivity
             sleep 12
 
+            adb shell run-as com.ethertia.client sh -c 'cat files/ethertia_boot.log' > /tmp/ethertia-bootlog.txt 2>/tmp/ethertia-bootlog.err || true
+
             adb logcat -d > /tmp/ethertia-logcat.txt
             grep -E "FATAL EXCEPTION|SIGSEGV|panic|PANIC|Abort message|AndroidRuntime" /tmp/ethertia-logcat.txt > /tmp/ethertia-logcat-crash.txt || true
             adb shell pidof -s com.ethertia.client > /tmp/ethertia-pid.txt || true
@@ -232,6 +234,8 @@ jobs:
             /tmp/ethertia-logcat.txt
             /tmp/ethertia-logcat-crash.txt
             /tmp/ethertia-pid.txt
+            /tmp/ethertia-bootlog.txt
+            /tmp/ethertia-bootlog.err
           if-no-files-found: warn
 
       - name: Write Diagnostic Summary
