@@ -125,12 +125,24 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_5
+          emulator-boot-timeout: 900
+          disable-linux-hw-accel: true
+          emulator-options: -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -camera-back none -camera-front none
           disable-animations: true
           script: |
             APK="target/android-debug/apk/ethertia-debug.apk"
             if [ ! -f "$APK" ]; then
               APK="target/release/apk/ethertia-debug.apk"
             fi
+            adb wait-for-device
+            for i in $(seq 1 120); do
+              BOOT_STATUS=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)
+              if [ "$BOOT_STATUS" = "1" ]; then
+                echo "Emulator boot completed."
+                break
+              fi
+              sleep 2
+            done
             echo "Installing $APK"
             adb install -r "$APK"
 
