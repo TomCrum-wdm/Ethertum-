@@ -7,21 +7,45 @@ use bevy_egui::{
 use crate::client::prelude::*;
 use crate::{client::client_world::ClientPlayerInfo, ui::prelude::*};
 
+fn build_startup_diagnostic_report(cli: &ClientInfo, cfg: &ClientSettings) -> String {
+    let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+    let parallelism = std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1);
+    format!(
+        "ethertia diagnostic\nversion: {}\nplatform: {}\nparallelism: {}\ncurrent_ui: {:?}\nserver_addr: {}\nusername: {}\nvsync: {}\nchunk_load_distance: ({}, {})\n",
+        crate::VERSION,
+        platform,
+        parallelism,
+        cli.curr_ui,
+        cli.server_addr,
+        cfg.username,
+        cfg.vsync,
+        cfg.chunks_load_distance.x,
+        cfg.chunks_load_distance.y,
+    )
+}
+
 pub fn ui_main_menu(
     // mut rendered_texture_id: Local<egui::TextureId>,
     // asset_server: Res<AssetServer>,
     mut app_exit_events: EventWriter<AppExit>,
     mut ctx: EguiContexts,
-    mut cli: EthertiaClient,
+    mut cli: ResMut<ClientInfo>,
+    cfg: Res<ClientSettings>,
+    mut copied_feedback: Local<f32>,
+    time: Res<Time>,
     // cmds: Commands,
     // mut dbg_server_addr: Local<String>,
 ) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
     // if *rendered_texture_id == egui::TextureId::default() {
     //     *rendered_texture_id = ctx.add_image(asset_server.load("ui/main_menu/1.png"));
     // }
     // let img = ctx.add_image(asset_server.load("proto.png"));
 
-    egui::CentralPanel::default().show(ctx.ctx_mut().unwrap(), |ui| {
+    egui::CentralPanel::default().show(ctx_mut, |ui| {
         let h = ui.available_height();
 
         // ui.painter().image(
@@ -58,17 +82,32 @@ pub fn ui_main_menu(
             //     next_ui.set(CurrentUI::LocalSaves);
             // }
             if ui.btn_normal("Singleplayer").clicked() {
-                cli.data().curr_ui = CurrentUI::LocalWorldList;
+                cli.curr_ui = CurrentUI::LocalWorldList;
             }
             if ui.btn_normal("Multiplayer").clicked() {
-                cli.data().curr_ui = CurrentUI::ServerList;
+                cli.curr_ui = CurrentUI::ServerList;
             }
             if ui.btn_normal("Settings").clicked() {
-                cli.data().curr_ui = CurrentUI::Settings;
+                cli.curr_ui = CurrentUI::Settings;
             }
             if ui.btn_normal("Terminate").clicked() {
                 app_exit_events.write(AppExit::Success);
             }
+
+            ui.add_space(12.);
+            if ui.btn_normal("复制诊断信息").clicked() {
+                let report = build_startup_diagnostic_report(&cli, &cfg);
+                ui.ctx().copy_text(report);
+                *copied_feedback = time.elapsed_secs();
+            }
+            if *copied_feedback > 0.0 && time.elapsed_secs() - *copied_feedback < 3.0 {
+                ui.small("已复制到剪贴板");
+            }
+
+            let report_preview = build_startup_diagnostic_report(&cli, &cfg);
+            ui.collapsing("诊断信息预览", |ui| {
+                ui.code(report_preview);
+            });
         });
 
         ui.with_layout(Layout::bottom_up(egui::Align::RIGHT), |ui| {
@@ -113,13 +152,17 @@ pub fn ui_pause_menu(
     mut player: ResMut<ClientPlayerInfo>,
     // mut net_client: ResMut<RenetClient>,
 ) {
-    egui::Window::new("Inventory").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    egui::Window::new("Inventory").show(ctx_mut, |ui| {
         ui_inventory(ui, &mut player.inventory);
     });
 
     super::new_egui_window("Pause")
         .anchor(Align2::CENTER_TOP, [0., 32.])
-        .show(ctx.ctx_mut().unwrap(), |ui| {
+        .show(ctx_mut, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut false, "Map");
                 ui.toggle_value(&mut false, "Inventory");
