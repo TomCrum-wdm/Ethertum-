@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      smoke_test:
+        description: "Run Android emulator smoke test"
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
@@ -43,9 +49,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          api-level: 34
-          build-tools-version: 36.0.0
+
+      - name: Install Android SDK Components
+        run: |
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;36.0.0"
 
       - name: Install Android NDK
         run: |
@@ -103,6 +113,51 @@ jobs:
           "$APKSIGNER" verify --verbose "$FINAL"
           
           ls -lah "$FINAL"
+
+      - name: Android Emulator Smoke Test
+        if: github.event_name == 'workflow_dispatch' && inputs.smoke_test == true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: arm64-v8a
+          target: google_apis
+          profile: pixel_5
+          disable-animations: true
+          script: |
+            APK="target/android-debug/apk/ethertia-debug.apk"
+            if [ ! -f "$APK" ]; then
+              APK="target/release/apk/ethertia-debug.apk"
+            fi
+            echo "Installing $APK"
+            adb install -r "$APK"
+
+            adb logcat -c
+            adb shell am start -W com.ethertia.client/android.app.NativeActivity
+            sleep 12
+
+            adb logcat -d > /tmp/ethertia-logcat.txt
+            adb shell pidof -s com.ethertia.client > /tmp/ethertia-pid.txt || true
+
+            if ! test -s /tmp/ethertia-pid.txt; then
+              echo "App process is not running after launch."
+              tail -n 200 /tmp/ethertia-logcat.txt || true
+              exit 1
+            fi
+
+            if grep -E "FATAL EXCEPTION|SIGSEGV|panic|PANIC|Abort message" /tmp/ethertia-logcat.txt; then
+              echo "Crash signatures detected in logcat."
+              exit 1
+            fi
+
+            echo "Smoke test passed: app launched and stayed alive."
+
+      - name: Upload Smoke Test Logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-smoke-logcat
+          path: /tmp/ethertia-logcat.txt
+          if-no-files-found: warn
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
