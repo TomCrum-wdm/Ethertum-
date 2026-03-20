@@ -10,6 +10,7 @@ use bevy_atmosphere::prelude::*;
 use crate::client::prelude::*;
 use crate::item::ItemPlugin;
 use crate::net::{CPacket, ClientNetworkPlugin, RenetClientHelper};
+#[cfg(not(target_os = "android"))]
 use crate::server::prelude::IntegratedServerPlugin;
 use crate::ui::prelude::*;
 use crate::voxel::ClientVoxelPlugin;
@@ -27,9 +28,13 @@ impl Plugin for ClientGamePlugin {
                 //app.insert_resource(AtmosphereModel::default());
             }
             
-            // for SSR
-            //app.insert_resource(Msaa::Off);
-            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+            // Keep mobile startup conservative: deferred path is more fragile on Android GPUs/drivers.
+            #[cfg(not(target_os = "android"))]
+            {
+                // for SSR
+                //app.insert_resource(Msaa::Off);
+                app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+            }
             
             // Billiboard
             // use bevy_mod_billboard::prelude::*;
@@ -59,6 +64,7 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
+        #[cfg(not(target_os = "android"))]
         app.add_plugins(IntegratedServerPlugin);
         
         // ClientInfo

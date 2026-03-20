@@ -58,11 +58,16 @@ pub fn client_sys(
         *last_connected = 0;
 
         if cli.disconnected_reason.is_empty() {
-            cli.disconnected_reason = net_client.disconnect_reason().unwrap().to_string();
+            cli.disconnected_reason = net_client
+                .disconnect_reason()
+                .map_or_else(|| "Unknown disconnect reason".to_string(), |r| r.to_string());
         }
 
         cmds.remove_resource::<WorldInfo>(); // todo: cli.close_world();
-        if net_client.disconnect_reason().unwrap() != DisconnectReason::DisconnectedByClient {
+        if net_client
+            .disconnect_reason()
+            .is_none_or(|r| r != DisconnectReason::DisconnectedByClient)
+        {
             cli.curr_ui = CurrentUI::DisconnectedReason;
         }
 

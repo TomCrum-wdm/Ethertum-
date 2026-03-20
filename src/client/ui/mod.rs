@@ -240,7 +240,7 @@ fn setup_camera_system(
     });
 
     // Camera
-    commands.spawn((
+    let mut camera_entity = commands.spawn((
         Camera3d::default(),
         Camera {
             //hdr: true,  // WARNING: Camera3d 和 ui的Camera2d 必须都开启hdr或者都不开启 否则只会渲染order大的那个
@@ -285,18 +285,30 @@ fn setup_camera_system(
         Msaa::Off,  // Optional 保持原本的设置, 之前关闭Msaa好像是为了SSR?
         // ScreenSpaceReflectionsBundle::default(),
         // Fxaa::default(),
-    ))
-        .insert(ScreenSpaceReflections::default())  // 会导致渲染异常 3d不渲染 历史没clear UB
-        .insert(Fxaa::default())
-        .insert(Tonemapping::TonyMcMapface)
-        .insert(Bloom::default())
-        .insert(bevy::light::VolumetricFog {
-            ambient_intensity: 0.,
-            //density: 0.01,
-            //light_tint: Color::linear_rgb(0.916, 0.941, 1.000),
-            ..default()
-        })
-    ;
+    ));
+
+    #[cfg(not(target_os = "android"))]
+    {
+        camera_entity
+            .insert(ScreenSpaceReflections::default())  // 会导致渲染异常 3d不渲染 历史没clear UB
+            .insert(Fxaa::default())
+            .insert(Tonemapping::TonyMcMapface)
+            .insert(Bloom::default())
+            .insert(bevy::light::VolumetricFog {
+                ambient_intensity: 0.,
+                //density: 0.01,
+                //light_tint: Color::linear_rgb(0.916, 0.941, 1.000),
+                ..default()
+            });
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        camera_entity
+            .insert(Fxaa::default())
+            .insert(Tonemapping::TonyMcMapface)
+            .insert(Bloom::NATURAL);
+    }
 }
 
 fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
