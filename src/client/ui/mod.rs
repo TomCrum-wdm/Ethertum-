@@ -385,7 +385,7 @@ fn update_ui_scale_factor_system(
     if keyboard_input.just_pressed(KeyCode::Slash) || toggle_scale_factor.is_none() {
         *toggle_scale_factor = Some(!toggle_scale_factor.unwrap_or(true));
 
-        let scale_factor = if toggle_scale_factor.unwrap() {
+        let scale_factor = if toggle_scale_factor.unwrap_or(true) {
             1.0
         } else {
             1.0 / camera.target_scaling_factor().unwrap_or(1.0)

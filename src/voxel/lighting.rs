@@ -51,7 +51,14 @@ pub fn compute_voxel_light(queue_add: &mut VoxLightQueue, queue_del: &mut VoxLig
 }
 
 fn try_spread_light(chunk: &ChunkPtr, lp: IVec3, lightlevel: u16, queue_add: &mut VoxLightQueue, queue_del: &mut VoxLightQueue) {
-    let chunk = if Chunk::is_localpos(lp) {chunk} else { &chunk.get_chunk_rel(lp).unwrap() };
+    let chunk = if Chunk::is_localpos(lp) {
+        chunk
+    } else {
+        let Some(neib) = chunk.get_chunk_rel(lp) else {
+            return;
+        };
+        neib
+    };
     let lp = Chunk::as_localpos(lp);
 
     let vox = chunk.at_voxel_mut(lp);

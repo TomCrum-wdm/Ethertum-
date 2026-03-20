@@ -152,7 +152,10 @@ fn chunks_detect_load_and_unload(
     tx_chunk_load: Res<ChannelTx<ChunkLoadingData>>,
     rx_chunk_load: Res<ChannelRx<ChunkLoadingData>>,
 ) {
-    let vp = Chunk::as_chunkpos(query_cam.single().unwrap().translation.as_ivec3()); // viewer pos
+    let Ok(cam_transform) = query_cam.single() else {
+        return;
+    };
+    let vp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3()); // viewer pos
     let vd = cfg.chunks_load_distance;
 
     // Chunks Detect Load/Gen
@@ -176,7 +179,9 @@ fn chunks_detect_load_and_unload(
 
             super::worldgen::generate_chunk(&mut chunk);
 
-            tx.send(chunk).unwrap();
+            if tx.send(chunk).is_err() {
+                warn!("Chunk loading channel closed");
+            }
         });
         task.detach();
         chunks_loading.insert(chunkpos);
@@ -225,7 +230,10 @@ fn chunks_remesh_enqueue(
     let mut chunks_remesh = Vec::from_iter(chunk_sys.chunks_remesh.iter().cloned());
 
     // Sort by Distance from the Camera.
-    let cam_cp = Chunk::as_chunkpos(query_cam.single().unwrap().translation.as_ivec3());
+    let Ok(cam_transform) = query_cam.single() else {
+        return;
+    };
+    let cam_cp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3());
     chunks_remesh.sort_unstable_by_key(|cp: &IVec3| bevy::math::FloatOrd(cp.distance_squared(cam_cp) as f32));
 
     for chunkpos in chunks_remesh {
@@ -318,8 +326,12 @@ fn chunks_remesh_enqueue(
                 _vbuf.2.to_mesh(&mut mesh_liquid);
                 _vbuf.2.clear();
 
-                tx.send((chunkpos, entity, mesh_terrain, mesh_handle_terrain, collider, mesh_foliage, mesh_handle_foliage, mesh_liquid, mesh_handle_liquid))
-                    .unwrap();
+                if tx
+                    .send((chunkpos, entity, mesh_terrain, mesh_handle_terrain, collider, mesh_foliage, mesh_handle_foliage, mesh_liquid, mesh_handle_liquid))
+                    .is_err()
+                {
+                    warn!("Chunk meshing channel closed");
+                }
             });
             task.detach();
 
@@ -333,11 +345,17 @@ fn chunks_remesh_enqueue(
 
     while let Ok((chunkpos, entity, mesh_terrain, mesh_handle_terrain, collider, mesh_foliage, mesh_handle_foliage, mesh_liquid, mesh_handle_liquid)) = rx_chunks_meshing.try_recv() {
         // Update Mesh Asset
-        *meshes.get_mut(mesh_handle_terrain.id()).unwrap() = mesh_terrain;
+        if let Some(dst) = meshes.get_mut(mesh_handle_terrain.id()) {
+            *dst = mesh_terrain;
+        }
 
-        *meshes.get_mut(mesh_handle_foliage.id()).unwrap() = mesh_foliage;
+        if let Some(dst) = meshes.get_mut(mesh_handle_foliage.id()) {
+            *dst = mesh_foliage;
+        }
 
-        *meshes.get_mut(mesh_handle_liquid.id()).unwrap() = mesh_liquid;
+        if let Some(dst) = meshes.get_mut(mesh_handle_liquid.id()) {
+            *dst = mesh_liquid;
+        }
 
         // Update Phys Collider TriMesh
         if let Some(collider) = collider {
@@ -394,7 +412,9 @@ fn raycast(
     cli: Res<ClientInfo>,
     vox_brush: Res<VoxelBrush>,
 ) {
-    let cam_trans = query_cam.single().unwrap();
+    let Ok(cam_trans) = query_cam.single() else {
+        return;
+    };
     let ray_pos = cam_trans.translation();
     let ray_dir = cam_trans.forward();
 
@@ -428,7 +448,9 @@ fn raycast(
         return;
     }
 
-    let action_state = query_input.single().unwrap();
+    let Ok(action_state) = query_input.single() else {
+        return;
+    };
     let do_break = action_state.just_pressed(&InputAction::Attack);
     let do_place = action_state.just_pressed(&InputAction::UseItem);
 

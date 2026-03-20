@@ -223,10 +223,9 @@ fn reinterpret_skybox_cubemap(
     mut images: ResMut<Assets<Image>>,
     mut cubemap: Option<ResMut<SkyboxCubemap>>,
 ) {
-    if cubemap.is_none() {
-       return; 
-    }
-    let mut cubemap = cubemap.unwrap();
+    let Some(mut cubemap) = cubemap else {
+        return;
+    };
     if !cubemap.is_loaded {
         if let Some(load_state) = asset_server.get_load_state(&cubemap.image_handle) {
             if load_state.is_loaded() {
@@ -311,7 +310,9 @@ fn tick_world(
     }
 
     // Fog
-    let mut fog = query_fog.single_mut().unwrap();
+    let Ok(mut fog) = query_fog.single_mut() else {
+        return;
+    };
     fog.color = cli.sky_fog_color;
     if cli.sky_fog_is_atomspheric {
         // let FogFalloff::Atmospheric { .. } = fog.falloff {
@@ -329,7 +330,7 @@ fn tick_world(
     // #[cfg(feature = "target_native_os")]
     // atmosphere.sun_position = Vec3::new(sun_angle.cos(), sun_angle.sin(), 0.);
 
-    if let Some((mut light_trans, mut directional)) = query_sun.single_mut().unwrap().into() {
+    if let Ok((mut light_trans, mut directional)) = query_sun.single_mut() {
         directional.illuminance = sun_angle.sin().max(0.0).powf(2.0) * cli.skylight_illuminance * 1000.0;
         directional.shadows_enabled = cli.skylight_shadow;
 

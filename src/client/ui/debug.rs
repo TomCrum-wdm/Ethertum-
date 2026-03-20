@@ -38,7 +38,7 @@ pub fn ui_menu_panel(
     // const ORANGE: Color = Color::rgb(0.741, 0.345, 0.133);
     const DARK_RED: Srgba = Srgba::rgb(0.525, 0.106, 0.176);
     const DARK: Srgba = Srgba::new(0., 0., 0., 0.800); // 0.176, 0.176, 0.176
-    let bg = if worldinfo.is_some() && worldinfo.as_ref().unwrap().is_paused {
+    let bg = if worldinfo.as_ref().is_some_and(|w| w.is_paused) {
         color32_of(DARK_RED)
     } else {
         color32_of(DARK)
@@ -163,26 +163,31 @@ pub fn ui_menu_panel(
                             ui.separator();
 
                             if let Some(mut chunk_sys) = chunk_sys {
-                                let campos = query_cam.single().unwrap().translation.as_ivec3();
+                                let Ok(cam_transform) = query_cam.single() else {
+                                    return;
+                                };
+                                let campos = cam_transform.translation.as_ivec3();
                                 if ui.button("Compute Voxel Light").clicked() {
                                     // for chunk in chunk_sys.get_chunks().values() {
                                     //     Chunk::compute_voxel_light(chunk.as_mut());
                                     // }
                                     let mut queue = VoxLightQueue::new();
 
-                                    queue.push((
-                                        chunk_sys.get_chunk(Chunk::as_chunkpos(campos)).unwrap().clone(), 
-                                        Chunk::local_idx(Chunk::as_localpos(campos)) as u16,
-                                        VoxLight::new(0, 15, 3, 4),
-                                    ));
+                                    if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
+                                        queue.push((
+                                            chunk.clone(),
+                                            Chunk::local_idx(Chunk::as_localpos(campos)) as u16,
+                                            VoxLight::new(0, 15, 3, 4),
+                                        ));
+                                    }
 
                                     use crate::voxel::lighting;
                                     
                                     for chunkpos in chunk_sys.get_chunks().keys() {
                                         if voxel::is_chunk_in_load_distance(Chunk::as_chunkpos(campos), *chunkpos, IVec2::new(2,2)) {
-                                            let chunk = chunk_sys.get_chunk(*chunkpos).unwrap();
-
-                                            lighting::collect_chunk_lights(chunk, &mut queue);
+                                            if let Some(chunk) = chunk_sys.get_chunk(*chunkpos) {
+                                                lighting::collect_chunk_lights(chunk, &mut queue);
+                                            }
 
                                             // lighting::compute_skylight(chunk, &mut queue);
                                         }
@@ -208,18 +213,20 @@ pub fn ui_menu_panel(
                                     }
                                 }
                                 if ui.button("Gen Tree").clicked() {
-                                    let chunk = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)).unwrap().as_mut();
-
-                                    worldgen::gen_tree(chunk, Chunk::as_localpos(campos), 0.8);
+                                    if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
+                                        worldgen::gen_tree(chunk.as_mut(), Chunk::as_localpos(campos), 0.8);
+                                    }
                                 }
                                 if ui.button("Gen Floor").clicked() {
 
                                     // crate::util::iter::iter_center_spread(10, 1, |p| {
                                     // });
-                                    let chunk = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)).unwrap().as_mut();
-                                    for x in 0..16 {
-                                        for z in 0..16 {
-                                            *chunk.at_voxel_mut(IVec3::new(x, 0, z)) = Vox::new(1, VoxShape::Cube, 0.);
+                                    if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
+                                        let chunk = chunk.as_mut();
+                                        for x in 0..16 {
+                                            for z in 0..16 {
+                                                *chunk.at_voxel_mut(IVec3::new(x, 0, z)) = Vox::new(1, VoxShape::Cube, 0.);
+                                            }
                                         }
                                     }
                                 }
@@ -273,7 +280,7 @@ pub fn hud_debug_text(
         // "LANG", "en_US.UTF-8",
         // "USERNAME", "Dreamtowards",
 
-        let num_concurrency = std::thread::available_parallelism().unwrap().get();
+        let num_concurrency = std::thread::available_parallelism().map(|v| v.get()).unwrap_or(1);
 
         // use sysinfo::{CpuExt, SystemExt};
 
@@ -286,7 +293,9 @@ pub fn hud_debug_text(
         let os_lang = std::env::var("LANG").unwrap_or("?lang".into()); // "en_US.UTF-8"
                                                                        //let user_name = std::env::var("USERNAME").unwrap();  // "Dreamtowards"
 
-        let cpu = sys.cpus().first().unwrap();
+        let Some(cpu) = sys.cpus().first() else {
+            return;
+        };
         let cpu_cores = sysinfo::System::physical_core_count().unwrap_or_default();
         let cpu_name = cpu.brand().trim().to_string();
         let cpu_usage = cpu.cpu_usage();
@@ -325,10 +334,16 @@ RAM: {mem_usage_phys:.2} MB, vir {mem_usage_virtual:.2} MB | {mem_used:.2} / {me
     let mut cam_visible_entities_num = 0;
     let mut str_world = String::default();
     if chunk_sys.is_some() && worldinfo.is_some() {
-        let chunk_sys = chunk_sys.unwrap();
-        let worldinfo = worldinfo.unwrap();
+        let Some(chunk_sys) = chunk_sys else {
+            return;
+        };
+        let Some(worldinfo) = worldinfo else {
+            return;
+        };
 
-        let (cam_trans, cam_visible_entities) = query_cam.single().unwrap();
+        let Ok((cam_trans, cam_visible_entities)) = query_cam.single() else {
+            return;
+        };
         let cam_pos = cam_trans.translation;
         let cam_pos_spd = (cam_pos - *last_cam_pos).length() / time.delta_secs();
         *last_cam_pos = cam_pos;
@@ -397,7 +412,10 @@ entity: vis {cam_visible_entities_num} / all {num_entity}
 "
     );
 
-    ctx.ctx_mut().unwrap().layer_painter(LayerId::new(egui::Order::Middle, Id::NULL)).text(
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+    ctx_mut.layer_painter(LayerId::new(egui::Order::Middle, Id::NULL)).text(
         [0., 48.].into(),
         Align2::LEFT_TOP,
         str,

@@ -69,7 +69,9 @@ fn chunks_load(
                 super::worldgen::generate_chunk(&mut chunk);
 
                 let chunkptr = Arc::new(chunk);
-                tx.send((chunkpos, chunkptr)).unwrap();
+                if tx.send((chunkpos, chunkptr)).is_err() {
+                    warn!("Server chunk loading channel closed");
+                }
             });
 
             task.detach();
@@ -115,7 +117,10 @@ fn chunks_load(
 
         if !any_desire {
             let chunkptr = chunk_sys.despawn_chunk(chunkpos);
-            let entity = chunkptr.unwrap().as_ref().entity;
+            let Some(chunkptr) = chunkptr else {
+                continue;
+            };
+            let entity = chunkptr.as_ref().entity;
             cmds.entity(entity).despawn();
 
             net_server.broadcast_packet(&SPacket::ChunkDel { chunkpos });

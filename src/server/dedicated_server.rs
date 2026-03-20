@@ -29,10 +29,20 @@ impl Plugin for DedicatedServerPlugin {
         app.add_systems(Last, on_exit); // save settings.
 
         let rcon_port = 8001;
-        let http_server = tiny_http::Server::http(format!("0.0.0.0:{}", rcon_port)).unwrap();
-        info!("Start RCON endpoint on {}", http_server.server_addr().to_ip().unwrap());
-        app.insert_resource(rcon::HttpServer { server: http_server });
-        app.add_systems(Update, rcon::on_http_recv);
+        match tiny_http::Server::http(format!("0.0.0.0:{}", rcon_port)) {
+            Ok(http_server) => {
+                if let Some(addr) = http_server.server_addr().to_ip() {
+                    info!("Start RCON endpoint on {}", addr);
+                } else {
+                    info!("Start RCON endpoint");
+                }
+                app.insert_resource(rcon::HttpServer { server: http_server });
+                app.add_systems(Update, rcon::on_http_recv);
+            }
+            Err(err) => {
+                warn!("Failed to start RCON endpoint on {}: {}", rcon_port, err);
+            }
+        }
     }
 }
 
@@ -49,8 +59,14 @@ fn on_init(mut cfg: ResMut<ServerSettings>) {
 fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ServerSettings>) {
     for _ in exit_events.read() {
         info!("Saving server settings to {SERVER_SETTINGS_FILE}");
-
-        std::fs::write(SERVER_SETTINGS_FILE, serde_json::to_string_pretty(&*cfg).unwrap()).unwrap();
+        match serde_json::to_string_pretty(&*cfg) {
+            Ok(content) => {
+                if let Err(err) = std::fs::write(SERVER_SETTINGS_FILE, content) {
+                    warn!("Failed to save server settings: {}", err);
+                }
+            }
+            Err(err) => warn!("Failed to serialize server settings: {}", err),
+        }
     }
 }
 
@@ -83,8 +99,14 @@ pub mod rcon {
                 favicon_url: "".into(),
                 game_addr: format!(":{}", cfg.port),
             };
-            req.respond(tiny_http::Response::from_string(serde_json::to_string(&motd).unwrap()))
-                .unwrap();
+            match serde_json::to_string(&motd) {
+                Ok(body) => {
+                    if let Err(err) = req.respond(tiny_http::Response::from_string(body)) {
+                        warn!("Failed to respond RCON request: {}", err);
+                    }
+                }
+                Err(err) => warn!("Failed to serialize RCON motd: {}", err),
+            }
         }
     }
 }

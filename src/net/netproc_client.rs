@@ -76,7 +76,13 @@ pub fn client_sys(
 
     while let Some(bytes) = net_client.receive_message(DefaultChannel::ReliableOrdered) {
         // info!("CLI Recv PACKET: {}", String::from_utf8_lossy(&bytes));
-        let packet: SPacket = bincode::deserialize(&bytes[..]).unwrap();
+        let packet: SPacket = match bincode::deserialize(&bytes[..]) {
+            Ok(packet) => packet,
+            Err(err) => {
+                warn!("Failed to deserialize SPacket: {}", err);
+                continue;
+            }
+        };
         match &packet {
             SPacket::Disconnect { reason } => {
                 info!("DisconnectedPacket: {}", reason);
@@ -147,7 +153,9 @@ pub fn client_sys(
             SPacket::EntityDel { entity_id } => {
                 info!("DeSpawn EntityDel {}", entity_id.raw());
 
-                cmds.get_entity(entity_id.client_entity()).unwrap().despawn();
+                if let Ok(mut ec) = cmds.get_entity(entity_id.client_entity()) {
+                    ec.despawn();
+                }
             }
             SPacket::PlayerList { playerlist } => {
                 cli.playerlist.clone_from(playerlist); // should move?
@@ -192,9 +200,11 @@ pub fn client_sys(
                 }
 
                 // todo: NonLock
-                let chunk = chunk_sys.get_chunk(*chunkpos).unwrap();
-
-                CellData::to_chunk(voxel, chunk.as_mut());
+                if let Some(chunk) = chunk_sys.get_chunk(*chunkpos) {
+                    CellData::to_chunk(voxel, chunk.as_mut());
+                } else {
+                    warn!("ChunkModify received for missing chunk {}", chunkpos);
+                }
             }
         }
     }

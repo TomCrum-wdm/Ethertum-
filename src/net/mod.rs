@@ -99,7 +99,7 @@ impl EntityId {
     }
 
     pub fn client_entity(&self) -> Entity {
-        Entity::from_raw_u32(10_000 + self.0).unwrap()
+        Entity::from_raw_u32(10_000 + self.0).unwrap_or(Entity::PLACEHOLDER)
     }
 
     pub fn raw(&self) -> u32 {
@@ -185,7 +185,11 @@ pub trait RenetServerHelper {
 }
 impl RenetServerHelper for RenetServer {
     fn send_packet<P: Serialize>(&mut self, client_id: ClientId, packet: &P) {
-        self.send_message(client_id, DefaultChannel::ReliableOrdered, bincode::serialize(packet).unwrap());
+        if let Ok(bytes) = bincode::serialize(packet) {
+            self.send_message(client_id, DefaultChannel::ReliableOrdered, bytes);
+        } else {
+            error!("Failed to serialize server packet for client {}", client_id);
+        }
     }
     fn send_packet_disconnect(&mut self, client_id: ClientId, reason: String) {
         self.send_packet(client_id, &SPacket::Disconnect { reason });
@@ -194,10 +198,18 @@ impl RenetServerHelper for RenetServer {
         self.send_packet(client_id, &SPacket::Chat { message });
     }
     fn broadcast_packet<P: Serialize>(&mut self, packet: &P) {
-        self.broadcast_message(DefaultChannel::ReliableOrdered, bincode::serialize(packet).unwrap());
+        if let Ok(bytes) = bincode::serialize(packet) {
+            self.broadcast_message(DefaultChannel::ReliableOrdered, bytes);
+        } else {
+            error!("Failed to serialize broadcast packet");
+        }
     }
     fn broadcast_packet_except<P: Serialize>(&mut self, except_id: ClientId, packet: &P) {
-        self.broadcast_message_except(except_id, DefaultChannel::ReliableOrdered, bincode::serialize(packet).unwrap());
+        if let Ok(bytes) = bincode::serialize(packet) {
+            self.broadcast_message_except(except_id, DefaultChannel::ReliableOrdered, bytes);
+        } else {
+            error!("Failed to serialize broadcast packet (except {})", except_id);
+        }
     }
     fn broadcast_packet_chat(&mut self, message: String) {
         info!("[BroadcastChat] {}", &message);
@@ -210,6 +222,10 @@ pub trait RenetClientHelper {
 }
 impl RenetClientHelper for RenetClient {
     fn send_packet<P: Serialize>(&mut self, packet: &P) {
-        self.send_message(DefaultChannel::ReliableOrdered, bincode::serialize(packet).unwrap());
+        if let Ok(bytes) = bincode::serialize(packet) {
+            self.send_message(DefaultChannel::ReliableOrdered, bytes);
+        } else {
+            error!("Failed to serialize client packet");
+        }
     }
 }

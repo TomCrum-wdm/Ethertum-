@@ -168,7 +168,8 @@ impl VoxLight {
         if chan == Self::RED { return self.red(); }
         if chan == Self::GREEN { return self.green(); }
         if chan == Self::BLUE { return self.blue(); }
-        panic!("illegal channel {chan}");
+        warn!("illegal light channel {}", chan);
+        0
     }
 
     pub fn set_sky(&mut self, v: u16) {
@@ -184,11 +185,23 @@ impl VoxLight {
         self.light = (self.light & !0xF) | (v & 0xF);
     }
     pub fn set(&mut self, chan: u8, val: u16) {
-        if chan == Self::SKY { self.set_sky(val); }
-        if chan == Self::RED { self.set_red(val); }
-        if chan == Self::GREEN { self.set_green(val); }
-        if chan == Self::BLUE { self.set_blue(val); }
-        panic!("illegal channel {chan}");
+        if chan == Self::SKY {
+            self.set_sky(val);
+            return;
+        }
+        if chan == Self::RED {
+            self.set_red(val);
+            return;
+        }
+        if chan == Self::GREEN {
+            self.set_green(val);
+            return;
+        }
+        if chan == Self::BLUE {
+            self.set_blue(val);
+            return;
+        }
+        warn!("illegal light channel {}", chan);
     }
 
     // Channels

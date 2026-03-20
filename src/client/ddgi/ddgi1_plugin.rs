@@ -271,7 +271,9 @@ fn debug_tex(
     
     if let (Some(irradiance_tex), Some(distance_tex)) = (ddgi_irradiance_texture, ddgi_distance_texture) {
         if let Some(image) = images.get_mut(&irradiance_tex.image) {
-            utils::save_tex(image.data.as_ref().unwrap(), "irradiance_tex.png");
+            if let Some(data) = image.data.as_ref() {
+                utils::save_tex(data, "irradiance_tex.png");
+            }
         }
         //utils::save_tex(&distance_tex.image.data, "distance_tex.png");
     }
@@ -547,8 +549,11 @@ mod utils {
         image_data: &[u8],
         path: &str,
     ) {
-        let s = format!("{}/{}", std::env::var("HOME").unwrap(), path);
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let s = format!("{}/{}", home, path);
         let output_path = std::path::Path::new(&s);
-        image::save_buffer(output_path, image_data, 32, 32, image::ColorType::Rgba8).unwrap();
+        if let Err(err) = image::save_buffer(output_path, image_data, 32, 32, image::ColorType::Rgba8) {
+            warn!("Failed to save DDGI debug texture: {}", err);
+        }
     }
 }

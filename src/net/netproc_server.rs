@@ -90,7 +90,13 @@ pub fn server_sys(
     for client_id in server.clients_id() {
         while let Some(bytes) = server.receive_message(client_id, DefaultChannel::ReliableOrdered) {
             // info!("Server Received: {}", String::from_utf8_lossy(&bytes));
-            let packet: CPacket = bincode::deserialize(&bytes[..]).unwrap();
+            let packet: CPacket = match bincode::deserialize(&bytes[..]) {
+                Ok(packet) => packet,
+                Err(err) => {
+                    warn!("Failed to deserialize CPacket from {}: {}", client_id, err);
+                    continue;
+                }
+            };
             match packet {
                 CPacket::Handshake { protocol_version } => {
                     if protocol_version < PROTOCOL_ID {
@@ -181,16 +187,32 @@ pub fn server_sys(
                         server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
                         continue;
                     }
-                    let player = player.unwrap();
+                    let Some(player) = player else {
+                        continue;
+                    };
 
                     match packet {
                         CPacket::ChatMessage { message } => {
                             if message.starts_with('/') {
-                                let args = shlex::split(&message[1..]).unwrap();
+                                let Some(args) = shlex::split(&message[1..]) else {
+                                    server.send_packet_chat(client_id, "Invalid command format".into());
+                                    continue;
+                                };
+                                if args.is_empty() {
+                                    server.send_packet_chat(client_id, "Empty command".into());
+                                    continue;
+                                }
 
                                 if args[0] == "time" {
-                                    if args[1] == "set" {
-                                        let daytime = args[2].parse::<f32>().unwrap();
+                                    if args.get(1).is_some_and(|v| v == "set") {
+                                        let Some(daytime_raw) = args.get(2) else {
+                                            server.send_packet_chat(client_id, "Usage: /time set <value>".into());
+                                            continue;
+                                        };
+                                        let Ok(daytime) = daytime_raw.parse::<f32>() else {
+                                            server.send_packet_chat(client_id, "Invalid daytime value".into());
+                                            continue;
+                                        };
                                         server.broadcast_packet(&SPacket::WorldTime { daytime });
                                     } else {
                                         server.send_packet_chat(client_id, "Current time is ".into());

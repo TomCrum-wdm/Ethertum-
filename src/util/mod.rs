@@ -44,7 +44,9 @@ impl AsMutRef<crate::voxel::Vox> for crate::voxel::Vox {
 use std::time::{Duration, SystemTime};
 
 pub fn current_timestamp() -> Duration {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap()
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
 }
 
 pub fn current_timestamp_millis() -> u64 {

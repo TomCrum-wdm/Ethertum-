@@ -172,16 +172,22 @@ pub fn hud_chat(
                     && state.history_index < state.history.len() - 1
                 {
                     if state.history_index == 0 && !state.buf.trim().is_empty() {
-                        *state.history.get_mut(0).unwrap() = state.buf.clone();
+                        if let Some(entry) = state.history.get_mut(0) {
+                            *entry = state.buf.clone();
+                        }
                     }
 
                     state.history_index += 1;
-                    state.buf = state.history.get(state.history_index).unwrap().clone();
+                    if let Some(entry) = state.history.get(state.history_index) {
+                        state.buf = entry.clone();
+                    }
 
                     set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
                 } else if text_edit_response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) && state.history_index > 0 {
                     state.history_index -= 1;
-                    state.buf = state.history.get(state.history_index).unwrap().clone();
+                    if let Some(entry) = state.history.get(state.history_index) {
+                        state.buf = entry.clone();
+                    }
 
                     set_cursor_pos(ui.ctx(), text_edit_response.id, state.buf.len());
                 }

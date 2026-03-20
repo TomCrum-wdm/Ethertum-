@@ -139,7 +139,9 @@ impl VertexBuffer {
         }
 
         for v in &mut self.vertices {
-            v.norm = *pos2norm.get(&v.pos.mul(SCALE).as_ivec3()).unwrap();
+            if let Some(norm) = pos2norm.get(&v.pos.mul(SCALE).as_ivec3()) {
+                v.norm = *norm;
+            }
         }
     }
 
