@@ -108,6 +108,7 @@ fn handle_android_lifecycle(
             bevy::window::AppLifecycle::WillSuspend | bevy::window::AppLifecycle::Suspended => {
                 if let Some(world) = &mut worldinfo {
                     world.is_paused = true;
+                    world.paused_steps = 0;
                 }
                 // Ensure app returns to a stable UI state when resuming from background.
                 if cli.curr_ui == CurrentUI::None {
@@ -116,6 +117,9 @@ fn handle_android_lifecycle(
                 cli.enable_cursor_look = false;
             }
             bevy::window::AppLifecycle::WillResume => {
+                if let Some(world) = &mut worldinfo {
+                    world.is_paused = false;
+                }
                 if cli.curr_ui == CurrentUI::None {
                     cli.curr_ui = CurrentUI::PauseMenu;
                 }

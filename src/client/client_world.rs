@@ -270,14 +270,14 @@ fn tick_world(
     // }
     // let dt_sec = worldinfo.tick_timer.duration().as_secs_f32();  // constant time step?
 
-    // // Pause & Steps
-    // if worldinfo.is_paused {
-    //     if  worldinfo.paused_steps > 0 {
-    //         worldinfo.paused_steps -= 1;
-    //     } else {
-    //         return;
-    //     }
-    // }
+    // Pause & Steps
+    if worldinfo.is_paused {
+        if worldinfo.paused_steps > 0 {
+            worldinfo.paused_steps -= 1;
+        } else {
+            return;
+        }
+    }
     let dt_sec = time.delta_secs();
 
     worldinfo.time_inhabited += dt_sec;
