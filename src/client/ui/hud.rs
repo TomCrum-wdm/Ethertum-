@@ -46,7 +46,7 @@ pub fn hud_chat(
     time: Res<Time>,
     input_key: Res<ButtonInput<KeyCode>>,
     mut cli: ResMut<ClientInfo>, // only curr_ui
-    mut net_client: ResMut<RenetClient>,
+    mut net_client: Option<ResMut<RenetClient>>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -127,7 +127,9 @@ pub fn hud_chat(
                         state.history.pop_back();
                     }
 
-                    net_client.send_packet(&CPacket::ChatMessage { message: cmdstr.clone() });
+                    if let Some(net_client) = net_client.as_mut() {
+                        net_client.send_packet(&CPacket::ChatMessage { message: cmdstr.clone() });
+                    }
 
                     // let mut args = Shlex::new(&state.buf).collect::<Vec<_>>();
 
@@ -266,14 +268,16 @@ pub fn hud_playerlist(
     input_key: Res<ButtonInput<KeyCode>>,
     cli: Res<ClientInfo>,
     cfg: Res<ClientSettings>,
-    mut net_client: ResMut<RenetClient>,
+    mut net_client: Option<ResMut<RenetClient>>,
 ) {
     if !input_key.pressed(KeyCode::Tab) {
         return;
     }
     if input_key.just_pressed(KeyCode::Tab) {
         info!("Request PlayerList");
-        net_client.send_packet(&CPacket::PlayerList);
+        if let Some(net_client) = net_client.as_mut() {
+            net_client.send_packet(&CPacket::PlayerList);
+        }
     }
 
     let Ok(ctx_mut) = ctx.ctx_mut() else {

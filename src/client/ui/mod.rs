@@ -289,6 +289,9 @@ fn setup_camera_system(
                 order: 0,
                 ..default()
             },
+            DistanceFog {
+                ..default()
+            },
             CharacterControllerCamera,
             Name::new("Camera"),
             DespawnOnWorldUnload,
@@ -392,6 +395,11 @@ fn ui_example_system(
 }
 
 fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+    #[cfg(target_os = "android")]
+    {
+        return;
+    }
+
     // if !*limbo_played {
     //     *limbo_played = true;
 

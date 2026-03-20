@@ -258,7 +258,7 @@ fn tick_world(
     time: Res<Time>,
 
     query_player: Query<&Transform, (With<CharacterController>, Without<Sun>)>,
-    mut net_client: ResMut<RenetClient>,
+    mut net_client: Option<ResMut<RenetClient>>,
     mut last_player_pos: Local<Vec3>,
 
     mut query_fog: Query<&mut DistanceFog>,
@@ -294,7 +294,9 @@ fn tick_world(
 
         if player_pos.distance_squared(*last_player_pos) > 0.01 * 0.01 {
             *last_player_pos = player_pos;
-            net_client.send_packet(&CPacket::PlayerPos { position: player_pos });
+            if let Some(net_client) = net_client.as_mut() {
+                net_client.send_packet(&CPacket::PlayerPos { position: player_pos });
+            }
         }
     }
     // net_client.send_packet(&CPacket::LoadDistance {
@@ -303,22 +305,23 @@ fn tick_world(
 
     // Ping Network
     if time.at_interval(1.0) {
-        net_client.send_packet(&CPacket::Ping {
-            client_time: crate::util::current_timestamp_millis(),
-            last_rtt: cli.ping.0 as u32,
-        });
+        if let Some(net_client) = net_client.as_mut() {
+            net_client.send_packet(&CPacket::Ping {
+                client_time: crate::util::current_timestamp_millis(),
+                last_rtt: cli.ping.0 as u32,
+            });
+        }
     }
 
     // Fog
-    let Ok(mut fog) = query_fog.single_mut() else {
-        return;
-    };
-    fog.color = cli.sky_fog_color;
-    if cli.sky_fog_is_atomspheric {
-        // let FogFalloff::Atmospheric { .. } = fog.falloff {
-        fog.falloff = FogFalloff::from_visibility_colors(cli.sky_fog_visibility, cli.sky_extinction_color, cli.sky_inscattering_color);
-    } else {
-        fog.falloff = FogFalloff::from_visibility_squared(cli.sky_fog_visibility / 4.0);
+    if let Ok(mut fog) = query_fog.single_mut() {
+        fog.color = cli.sky_fog_color;
+        if cli.sky_fog_is_atomspheric {
+            // let FogFalloff::Atmospheric { .. } = fog.falloff {
+            fog.falloff = FogFalloff::from_visibility_colors(cli.sky_fog_visibility, cli.sky_extinction_color, cli.sky_inscattering_color);
+        } else {
+            fog.falloff = FogFalloff::from_visibility_squared(cli.sky_fog_visibility / 4.0);
+        }
     }
 
     // Sun Pos

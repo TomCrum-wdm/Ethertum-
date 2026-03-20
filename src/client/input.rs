@@ -125,7 +125,11 @@ pub fn input_handle(
     let curr_manipulating = cli.curr_ui == CurrentUI::None;
 
     // Apply Cursor Grab
+    #[cfg(target_os = "android")]
+    let cursor_grab = false;
+    #[cfg(not(target_os = "android"))]
     let cursor_grab = curr_manipulating && cli.enable_cursor_look;
+
     primary_cursor_options.grab_mode = if cursor_grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
     primary_cursor_options.visible = !cursor_grab;
 
@@ -172,12 +176,15 @@ pub fn input_handle(
     }
 
     // Toggle Fullscreen
-    if action_state.just_pressed(&InputAction::Fullscreen) || (key.pressed(KeyCode::AltLeft) && key.just_pressed(KeyCode::Enter)) {
-        window.mode = if window.mode != WindowMode::Windowed {
-            WindowMode::Windowed
-        } else {
-            WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current)
-        };
+    #[cfg(not(target_os = "android"))]
+    {
+        if action_state.just_pressed(&InputAction::Fullscreen) || (key.pressed(KeyCode::AltLeft) && key.just_pressed(KeyCode::Enter)) {
+            window.mode = if window.mode != WindowMode::Windowed {
+                WindowMode::Windowed
+            } else {
+                WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current)
+            };
+        }
     }
     // Vsync
     window.present_mode = if cfg.vsync { PresentMode::AutoVsync } else { PresentMode::AutoNoVsync };
