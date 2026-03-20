@@ -34,20 +34,34 @@ impl Plugin for ServerNetworkPlugin {
 }
 
 fn bind_server_endpoint(mut cmds: Commands, cfg: Res<ServerSettings>) {
-    cmds.insert_resource(super::new_netcode_server_transport(cfg.port, 64));
-    info!("Server bind endpoint at port {}", cfg.port);
+    match super::new_netcode_server_transport(cfg.port, 64) {
+        Ok(transport) => {
+            cmds.insert_resource(transport);
+            info!("Server bind endpoint at port {}", cfg.port);
+        }
+        Err(err) => {
+            error!("Failed to bind server endpoint at port {}: {}", cfg.port, err);
+            error!("Integrated server will be unavailable. Multiplayer features only.");
+            // Don't panic - allow app to continue without integrated server
+        }
+    }
 }
 
 pub fn server_sys(
     mut server_events: EventReader<ServerEvent>,
     mut server: ResMut<RenetServer>,
-    transport: Res<NetcodeServerTransport>,
+    transport: Option<Res<NetcodeServerTransport>>,
 
     mut serverinfo: ResMut<ServerInfo>,
     // mut worldinfo: ResMut<WorldInfo>,
     // chunk_sys: ResMut<ServerChunkSystem>,
     mut cmds: Commands,
 ) {
+    // If server failed to bind, skip processing
+    let Some(transport) = transport else {
+        return;
+    };
+
     for event in server_events.read() {
         match event {
             ServerEvent::ClientConnected { client_id } => {

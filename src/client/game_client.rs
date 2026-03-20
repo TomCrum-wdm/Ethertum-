@@ -293,10 +293,21 @@ impl<'w, 's> EthertiaClient<'w, 's> {
         });
 
         self.cmds.insert_resource(net_client);
-        self.cmds.insert_resource(crate::net::new_netcode_client_transport(
+
+        match crate::net::new_netcode_client_transport(
             addr,
             Some("userData123".to_string().into_bytes()),
-        ));
+        ) {
+            Ok(transport) => {
+                self.cmds.insert_resource(transport);
+            }
+            Err(err) => {
+                error!("Failed to establish connection to {}: {}", server_addr, err);
+                self.data().disconnected_reason = format!("Connection failed: {}", err);
+                self.data().curr_ui = CurrentUI::DisconnectedReason;
+                return;
+            }
+        }
 
         // clear DisconnectReason on new connect, to prevents display old invalid reason.
         self.clientinfo.disconnected_reason.clear();

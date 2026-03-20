@@ -23,9 +23,10 @@ pub use packet::{CPacket, CellData, SPacket};
 
 const PROTOCOL_ID: u64 = 1;
 
-pub fn new_netcode_server_transport(public_addr_port: u16, max_clients: usize) -> NetcodeServerTransport {
+pub fn new_netcode_server_transport(public_addr_port: u16, max_clients: usize) -> anyhow::Result<NetcodeServerTransport> {
     let public_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), public_addr_port);
-    let socket = UdpSocket::bind(public_addr).unwrap();
+    let socket = UdpSocket::bind(public_addr)
+        .map_err(|e| anyhow::anyhow!("Failed to bind server socket to port {}: {}", public_addr_port, e))?;
     let server_config = ServerConfig {
         current_time: current_timestamp(),
         max_clients,
@@ -33,12 +34,15 @@ pub fn new_netcode_server_transport(public_addr_port: u16, max_clients: usize) -
         public_addresses: vec![public_addr],
         authentication: ServerAuthentication::Unsecure,
     };
-    NetcodeServerTransport::new(server_config, socket).unwrap()
+    let transport = NetcodeServerTransport::new(server_config, socket)
+        .map_err(|e| anyhow::anyhow!("Failed to create NetcodeServerTransport: {}", e))?;
+    Ok(transport)
 }
 
-pub fn new_netcode_client_transport(server_addr: SocketAddr, user_data: Option<Vec<u8>>) -> NetcodeClientTransport {
+pub fn new_netcode_client_transport(server_addr: SocketAddr, user_data: Option<Vec<u8>>) -> anyhow::Result<NetcodeClientTransport> {
     // let server_addr = "127.0.0.1:5000".parse().unwrap();
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = UdpSocket::bind("0.0.0.0:0")
+        .map_err(|e| anyhow::anyhow!("Failed to bind client socket: {}", e))?;
     let current_time = current_timestamp();
     let client_id = current_time.as_millis() as u64;
 
@@ -55,7 +59,9 @@ pub fn new_netcode_client_transport(server_addr: SocketAddr, user_data: Option<V
         server_addr,
         user_data,
     };
-    NetcodeClientTransport::new(current_time, authentication, socket).unwrap()
+    let transport = NetcodeClientTransport::new(current_time, authentication, socket)
+        .map_err(|e| anyhow::anyhow!("Failed to create NetcodeClientTransport: {}", e))?;
+    Ok(transport)
 }
 
 fn net_channel_config(max_memory_usage_bytes: usize) -> Vec<ChannelConfig> {
