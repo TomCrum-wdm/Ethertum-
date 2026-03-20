@@ -58,6 +58,7 @@ impl Plugin for ItemPlugin {
         // app.insert_resource(Registry::default());
 
         app.add_systems(Startup, setup_items);
+        app.add_systems(bevy_egui::EguiPrimaryContextPass, setup_items_egui);
 
         // app.add_systems(PostStartup, bake_items);
     }
@@ -90,7 +91,6 @@ fn setup_items(
     items: ResMut<Items>,
     // mut reg: ResMut<Registry>,
     asset_server: Res<AssetServer>,
-    mut egui_ctx: bevy_egui::EguiContexts,
 ) {
     let reg = crate::util::as_mut(&items.reg);
     let items = crate::util::as_mut(&*items);
@@ -121,11 +121,26 @@ fn setup_items(
     info!("Registered {} items: {:?}", reg.len(), reg.vec);
 
     items.atlas = asset_server.load("baked/items.png");
-    items.atlas_egui = egui_ctx.add_image(bevy_egui::EguiTextureHandle::Strong(items.atlas.clone()));
 
     unsafe {
         _ITEMS_REG = std::ptr::from_ref(items);
     }
+}
+
+fn setup_items_egui(
+    mut items: ResMut<Items>,
+    mut egui_ctx: bevy_egui::EguiContexts,
+    mut initialized: Local<bool>,
+) {
+    if *initialized {
+        return;
+    }
+    if items.atlas.id() == Handle::<Image>::default().id() {
+        return;
+    }
+
+    items.atlas_egui = egui_ctx.add_image(bevy_egui::EguiTextureHandle::Strong(items.atlas.clone()));
+    *initialized = true;
 }
 
 // use image::{self, GenericImageView, RgbaImage};

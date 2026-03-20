@@ -116,17 +116,20 @@ pub fn ui_main_menu(
 
         ui.with_layout(Layout::bottom_up(egui::Align::LEFT), |ui| {
             ui.horizontal(|ui| {
-                if sfx_play(ui.selectable_label(false, "")).on_hover_text("Github Repository").clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
-                }
-                if sfx_play(ui.selectable_label(false, "")).on_hover_text("Steam").clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
-                }
-                if sfx_play(ui.selectable_label(false, "")).on_hover_text("YouTube").clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
-                }
-                if sfx_play(ui.selectable_label(false, "⛓")).on_hover_text("Wiki & Documentations").clicked() {
-                    ui.ctx().open_url(OpenUrl::new_tab("https://docs.ethertia.com"));
+                #[cfg(not(target_os = "android"))]
+                {
+                    if sfx_play(ui.selectable_label(false, "")).on_hover_text("Github Repository").clicked() {
+                        ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
+                    }
+                    if sfx_play(ui.selectable_label(false, "")).on_hover_text("Steam").clicked() {
+                        ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
+                    }
+                    if sfx_play(ui.selectable_label(false, "")).on_hover_text("YouTube").clicked() {
+                        ui.ctx().open_url(OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum"));
+                    }
+                    if sfx_play(ui.selectable_label(false, "⛓")).on_hover_text("Wiki & Documentations").clicked() {
+                        ui.ctx().open_url(OpenUrl::new_tab("https://docs.ethertia.com"));
+                    }
                 }
                 ui.label("|");
                 sfx_play(ui.selectable_label(false, "")); // Windows

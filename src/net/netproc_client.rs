@@ -34,7 +34,7 @@ impl Plugin for ClientNetworkPlugin {
 
 pub fn client_sys(
     // mut client_events: EventReader<ClientEvent>,
-    mut net_client: ResMut<RenetClient>,
+    mut net_client: Option<ResMut<RenetClient>>,
     mut last_connected: Local<u32>, // 0=NonConnection, 1=Connecting, 2=Connected
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,
@@ -50,6 +50,10 @@ pub fn client_sys(
     asset_server: Res<AssetServer>,
     // entity_s2c: Local<HashMap<Entity, Entity>>,
 ) {
+    let Some(mut net_client) = net_client else {
+        return;
+    };
+
     if *last_connected != 1 && net_client.is_connecting() {
         *last_connected = 1;
     } else if *last_connected != 2 && net_client.is_connected() {

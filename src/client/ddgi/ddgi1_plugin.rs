@@ -550,8 +550,13 @@ mod utils {
         path: &str,
     ) {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let s = format!("{}/{}", home, path);
-        let output_path = std::path::Path::new(&s);
+        let output_path = std::path::Path::new(&home).join(path);
+        if let Some(parent) = output_path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                warn!("Failed to create DDGI debug texture directory {}: {}", parent.display(), err);
+                return;
+            }
+        }
         if let Err(err) = image::save_buffer(output_path, image_data, 32, 32, image::ColorType::Rgba8) {
             warn!("Failed to save DDGI debug texture: {}", err);
         }

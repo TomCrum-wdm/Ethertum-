@@ -39,6 +39,11 @@ fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<Client
         info!("Saving {}", cfg_path.display());
         match serde_json::to_string_pretty(&*cfg) {
             Ok(content) => {
+                if let Some(parent) = cfg_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                    if let Err(err) = std::fs::create_dir_all(parent) {
+                        warn!("Failed to create settings directory {}: {err}", parent.display());
+                    }
+                }
                 if let Err(err) = std::fs::write(&cfg_path, content) {
                     warn!("Failed to save {}: {err}", cfg_path.display());
                 }

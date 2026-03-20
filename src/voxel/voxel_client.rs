@@ -418,7 +418,10 @@ fn raycast(
     let ray_pos = cam_trans.translation();
     let ray_dir = cam_trans.forward();
 
-    let player_entity = query_player.single().unwrap_or(Entity::PLACEHOLDER);
+    let player_entity = match query_player.single() {
+        Ok(entity) => entity,
+        Err(_) => Entity::PLACEHOLDER,
+    };
 
     if let Some(hit) = spatial_query.cast_ray(
         ray_pos,

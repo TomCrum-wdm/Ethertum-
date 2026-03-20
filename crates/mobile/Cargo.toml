@@ -32,6 +32,15 @@ target_sdk_version = 36
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
 
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.POST_NOTIFICATIONS"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.VIBRATE"
+
 [package.metadata.android.application]
 icon = "@mipmap/icon"
 label = "ethertia"

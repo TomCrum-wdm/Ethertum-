@@ -18,7 +18,11 @@ use super::{sfx_play, ui_lr_panel, CurrentUI, UiExtra};
 use super::new_egui_window;
 
 pub fn ui_connecting_server(mut ctx: EguiContexts, mut cli: EthertiaClient, net_client: Option<ResMut<RenetClient>>) {
-    new_egui_window("Server List").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("Server List").show(ctx_mut, |ui| {
         let h = ui.available_height();
 
         ui.vertical_centered(|ui| {
@@ -45,7 +49,11 @@ pub fn ui_disconnected_reason(
     mut ctx: EguiContexts,
     mut cli: ResMut<ClientInfo>, // readonly. mut only for curr_ui.
 ) {
-    new_egui_window("Disconnected Reason").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("Disconnected Reason").show(ctx_mut, |ui| {
         let h = ui.available_height();
 
         ui.vertical_centered(|ui| {
@@ -80,7 +88,11 @@ pub fn ui_serverlist(
     mut cli: EthertiaClient,
     // mut refreshing_indices: Local<HashMap<usize, (Task<anyhow::Result<Motd>>, u64)>>,
 ) {
-    new_egui_window("Server List").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("Server List").show(ctx_mut, |ui| {
         let serverlist = &mut cli.cfg.serverlist;
 
         // all access defer to one closure.
@@ -200,18 +212,20 @@ pub fn ui_serverlist(
                             )
                         });
                         if task.is_finished() {
-                            match futures_lite::future::block_on(futures_lite::future::poll_once(task)).unwrap() {
-                                Ok(r) => {
-                                    ui_server_info.motd = r.motd;
-                                    ui_server_info.num_players_limit = r.num_player_limit;
-                                    ui_server_info.num_players_online = r.num_player_online;
-                                    ui_server_info.gameplay_addr = r.game_addr;
-                                    ui_server_info.ping = (util::current_timestamp_millis() - *time) as u32;
-                                }
-                                Err(err) => {
-                                    info!("Failed to access server status: {}", err);
-                                    ui_server_info.ping = 0;
-                                    ui_server_info.motd = err.to_string();
+                            if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
+                                match polled {
+                                    Ok(r) => {
+                                        ui_server_info.motd = r.motd;
+                                        ui_server_info.num_players_limit = r.num_player_limit;
+                                        ui_server_info.num_players_online = r.num_player_online;
+                                        ui_server_info.gameplay_addr = r.game_addr;
+                                        ui_server_info.ping = (util::current_timestamp_millis() - *time) as u32;
+                                    }
+                                    Err(err) => {
+                                        info!("Failed to access server status: {}", err);
+                                        ui_server_info.ping = 0;
+                                        ui_server_info.motd = err.to_string();
+                                    }
                                 }
                             }
                             is_refreshing = false;
@@ -250,8 +264,25 @@ pub fn ui_serverlist(
     });
 }
 
-pub fn ui_localsaves(mut ctx: EguiContexts, mut cli: EthertiaClient, mut idx_editing: Local<Option<usize>>, serv_cfg: Res<ServerSettings>) {
-    new_egui_window("Local Worlds").show(ctx.ctx_mut().unwrap(), |ui| {
+pub fn ui_localsaves(
+    mut ctx: EguiContexts,
+    mut cli: EthertiaClient,
+    mut idx_editing: Local<Option<usize>>,
+    serv_cfg: Option<Res<ServerSettings>>,
+) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("Local Worlds").show(ctx_mut, |ui| {
+        let local_world_supported = serv_cfg.is_some();
+
+        if !local_world_supported {
+            ui.colored_label(Color32::YELLOW, "Local worlds are unavailable on this platform/runtime.");
+            ui.small("Integrated server is not active. Use Multiplayer to connect to a remote server.");
+            ui.add_space(8.0);
+        }
+
         ui_lr_panel(
             ui,
             false,
@@ -299,9 +330,10 @@ Inhabited: 10.3 hours",
                                         *idx_editing = Some(idx);
                                     }
                                     if ui.btn("▶").on_hover_text("Play").clicked() {
-                                        // cli.enter_world();
-
-                                        cli.connect_server(format!("127.0.0.1:{}", serv_cfg.port));
+                                        if let Some(serv_cfg) = &serv_cfg {
+                                            // cli.enter_world();
+                                            cli.connect_server(format!("127.0.0.1:{}", serv_cfg.port));
+                                        }
                                     }
                                 }
                             });
@@ -328,7 +360,11 @@ pub fn ui_create_world(
     mut tx_world_seed: Local<String>,
     mut _difficulty: Local<Difficulty>,
 ) {
-    new_egui_window("New World").show(ctx.ctx_mut().unwrap(), |ui| {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    new_egui_window("New World").show(ctx_mut, |ui| {
         // ui_lr_panel(ui, true, |ui| {
         //     if sfx_play(ui.selectable_label(true, "General")).clicked() {
 
