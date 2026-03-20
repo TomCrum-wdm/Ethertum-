@@ -230,7 +230,9 @@ fn reinterpret_skybox_cubemap(
     if !cubemap.is_loaded {
         if let Some(load_state) = asset_server.get_load_state(&cubemap.image_handle) {
             if load_state.is_loaded() {
-                let image = images.get_mut(&cubemap.image_handle).unwrap();
+                let Some(image) = images.get_mut(&cubemap.image_handle) else {
+                    return;
+                };
                 // NOTE: PNGs do not have any metadata that could indicate they contain a cubemap texture,
                 // so they appear as one texture. The following code reconfigures the texture as necessary.
                 if image.texture_descriptor.array_layer_count() == 1 {

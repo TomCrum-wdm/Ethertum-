@@ -91,7 +91,7 @@ pub fn input_handle(
 
     mut mouse_wheel_events: EventReader<bevy::input::mouse::MouseWheel>,
     mut query_window: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
-    mut primary_cursor_options: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    mut query_cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut query_controller: Query<&mut CharacterController>,
 
     worldinfo: Option<ResMut<WorldInfo>>,
@@ -103,6 +103,9 @@ pub fn input_handle(
         return;
     };
     let Ok(mut window) = query_window.single_mut() else {
+        return;
+    };
+    let Ok(mut primary_cursor_options) = query_cursor_options.single_mut() else {
         return;
     };
 

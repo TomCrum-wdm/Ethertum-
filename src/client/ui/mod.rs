@@ -377,9 +377,11 @@ fn configure_ui_state_system(mut ui_state: ResMut<UiState>) {
 fn update_ui_scale_factor_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut toggle_scale_factor: Local<Option<bool>>,
-    egui_context: Single<(&mut EguiContextSettings, &Camera)>,
+    mut query_egui_camera: Query<(&mut EguiContextSettings, &Camera)>,
 ) {
-    let (mut egui_settings, camera) = egui_context.into_inner();
+    let Ok((mut egui_settings, camera)) = query_egui_camera.single_mut() else {
+        return;
+    };
     if keyboard_input.just_pressed(KeyCode::Slash) || toggle_scale_factor.is_none() {
         *toggle_scale_factor = Some(!toggle_scale_factor.unwrap_or(true));
 
