@@ -140,6 +140,8 @@ jobs:
             : > /tmp/ethertia-bootlog.txt
             : > /tmp/ethertia-bootlog.err
             : > /tmp/ethertia-emulator-debug.txt
+            : > /tmp/ethertia-start-debug.txt
+            : > /tmp/ethertia-tombstones.txt
 
             APK="target/android-debug/apk/ethertia-debug.apk"
             if [ ! -f "$APK" ]; then
@@ -167,6 +169,10 @@ jobs:
             echo "Installing $APK"
             adb install -r "$APK" >> /tmp/ethertia-emulator-debug.txt 2>&1 || FAIL=1
 
+            # Prelaunch checks: verify package/activity resolvable before launch.
+            adb shell pm path com.ethertia.client > /tmp/ethertia-start-debug.txt 2>&1 || FAIL=1
+            adb shell cmd package resolve-activity --brief com.ethertia.client/android.app.NativeActivity >> /tmp/ethertia-start-debug.txt 2>&1 || true
+
             adb logcat -c || true
             adb shell am start -W com.ethertia.client/android.app.NativeActivity >> /tmp/ethertia-emulator-debug.txt 2>&1 || FAIL=1
             sleep 12
@@ -176,6 +182,8 @@ jobs:
             adb logcat -d > /tmp/ethertia-logcat.txt 2>> /tmp/ethertia-emulator-debug.txt || true
             grep -E "FATAL EXCEPTION|SIGSEGV|panic|PANIC|Abort message|AndroidRuntime" /tmp/ethertia-logcat.txt > /tmp/ethertia-logcat-crash.txt || true
             adb shell pidof -s com.ethertia.client > /tmp/ethertia-pid.txt 2>> /tmp/ethertia-emulator-debug.txt || true
+            adb shell ls -l /data/tombstones > /tmp/ethertia-tombstones.txt 2>&1 || true
+            adb shell run-as com.ethertia.client ls -l files >> /tmp/ethertia-start-debug.txt 2>&1 || true
 
             if ! test -s /tmp/ethertia-pid.txt; then
               echo "App process is not running after launch."
@@ -262,6 +270,8 @@ jobs:
             /tmp/ethertia-bootlog.txt
             /tmp/ethertia-bootlog.err
             /tmp/ethertia-emulator-debug.txt
+            /tmp/ethertia-start-debug.txt
+            /tmp/ethertia-tombstones.txt
           if-no-files-found: warn
 
       - name: Write Diagnostic Summary
