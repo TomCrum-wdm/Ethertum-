@@ -1,3 +1,4 @@
+use bevy::prelude::Res;
 use bevy_egui::egui::Painter;
 use std::sync::Mutex;
 

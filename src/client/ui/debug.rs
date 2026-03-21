@@ -203,16 +203,16 @@ pub fn ui_menu_panel(
                                 }
 
                                 if ui.button("ReMesh All Chunks").clicked() {
-                                    // let ls = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
-                                    for chunkpos in chunk_sys.get_chunks().keys() {
-                                        chunk_sys.mark_chunk_remesh(*chunkpos);
+                                    let chunk_keys = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
+                                    for chunkpos in chunk_keys {
+                                        chunk_sys.mark_chunk_remesh(chunkpos);
                                     }
                                 }
                                 if ui.button("ReMesh Nr Chunks").clicked() {
-                                    // let ls = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
-                                    for chunkpos in chunk_sys.get_chunks().keys() {
-                                        if voxel::is_chunk_in_load_distance(Chunk::as_chunkpos(campos), *chunkpos, IVec2::new(2,2)) {
-                                            chunk_sys.mark_chunk_remesh(*chunkpos);
+                                    let chunk_keys = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
+                                    for chunkpos in chunk_keys {
+                                        if voxel::is_chunk_in_load_distance(Chunk::as_chunkpos(campos), chunkpos, IVec2::new(2,2)) {
+                                            chunk_sys.mark_chunk_remesh(chunkpos);
                                         }
                                     }
                                 }
