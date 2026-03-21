@@ -37,13 +37,23 @@ pub trait ChunkSystem {
     fn get_chunks(&self) -> &HashMap<IVec3, ChunkPtr>;
 
     fn get_chunk(&self, chunkpos: IVec3) -> Option<&ChunkPtr> {
-        assert!(Chunk::is_chunkpos(chunkpos));
-        self.get_chunks().get(&chunkpos)
+        let cp = if Chunk::is_chunkpos(chunkpos) {
+            chunkpos
+        } else {
+            debug!("Invalid chunkpos {}, normalized via as_chunkpos", chunkpos);
+            Chunk::as_chunkpos(chunkpos)
+        };
+        self.get_chunks().get(&cp)
     }
 
     fn has_chunk(&self, chunkpos: IVec3) -> bool {
-        assert!(Chunk::is_chunkpos(chunkpos));
-        self.get_chunks().contains_key(&chunkpos)
+        let cp = if Chunk::is_chunkpos(chunkpos) {
+            chunkpos
+        } else {
+            debug!("Invalid chunkpos {}, normalized via as_chunkpos", chunkpos);
+            Chunk::as_chunkpos(chunkpos)
+        };
+        self.get_chunks().contains_key(&cp)
     }
 
     fn num_chunks(&self) -> usize {

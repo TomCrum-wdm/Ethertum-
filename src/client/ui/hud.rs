@@ -202,9 +202,13 @@ pub fn hud_chat(
 }
 
 pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: ResMut<ClientPlayerInfo>,
+    items: Option<Res<crate::item::Items>>,
     mut voxbrush: ResMut<VoxelBrush>,
     // chunk_sys: Res<ClientChunkSystem>,
 ) {
+    let Some(items) = items else {
+        return;
+    };
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
@@ -244,7 +248,9 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
                 ui.painter().rect_filled(rect, rounding, Color32::from_black_alpha(200));
 
                 // bar fg
-                let rect_fg = rect.with_max_x(rect.min.x + health_bar_size.x * (player.health as f32 / player.health_max as f32));
+                let health_max = player.health_max.max(1);
+                let hp_ratio = (player.health as f32 / health_max as f32).clamp(0.0, 1.0);
+                let rect_fg = rect.with_max_x(rect.min.x + health_bar_size.x * hp_ratio);
                 ui.painter().rect_filled(rect_fg, rounding, Color32::WHITE);
 
                 // ui.painter().text(rect.left_center(), Align2::LEFT_CENTER,
@@ -256,7 +262,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
             ui.horizontal(|ui| {
                 for i in 0..ClientPlayerInfo::HOTBAR_SLOTS {
                     if let Some(item) = player.inventory.items.get_mut(i as usize) {
-                        ui_item_stack(ui, item);
+                        ui_item_stack(ui, item, &items);
                     }
                 }
             });

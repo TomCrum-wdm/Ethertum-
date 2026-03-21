@@ -153,14 +153,19 @@ pub fn ui_pause_menu(
     mut ctx: EguiContexts,
     mut cli: EthertiaClient,
     mut player: ResMut<ClientPlayerInfo>,
+    items: Option<Res<crate::item::Items>>,
     // mut net_client: ResMut<RenetClient>,
 ) {
+    let Some(items) = items else {
+        return;
+    };
+
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
 
     egui::Window::new("Inventory").show(ctx_mut, |ui| {
-        ui_inventory(ui, &mut player.inventory);
+        ui_inventory(ui, &mut player.inventory, &items);
     });
 
     super::new_egui_window("Pause")

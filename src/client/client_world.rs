@@ -283,10 +283,13 @@ fn tick_world(
     worldinfo.time_inhabited += dt_sec;
 
     // DayTime
-    if worldinfo.daytime_length != 0. {
-        worldinfo.daytime += dt_sec / worldinfo.daytime_length;
-        worldinfo.daytime -= worldinfo.daytime.trunc(); // trunc to [0-1]
-    }
+    let daytime_length = if worldinfo.daytime_length.is_finite() && worldinfo.daytime_length > f32::EPSILON {
+        worldinfo.daytime_length
+    } else {
+        60.0 * 24.0
+    };
+    worldinfo.daytime += dt_sec / daytime_length;
+    worldinfo.daytime -= worldinfo.daytime.trunc(); // trunc to [0-1]
 
     // Send PlayerPos
     if let Ok(player_loc) = query_player.single() {
@@ -316,11 +319,16 @@ fn tick_world(
     // Fog
     if let Ok(mut fog) = query_fog.single_mut() {
         fog.color = cli.sky_fog_color;
+        let visibility = if cli.sky_fog_visibility.is_finite() {
+            cli.sky_fog_visibility.max(0.001)
+        } else {
+            1200.0
+        };
         if cli.sky_fog_is_atomspheric {
             // let FogFalloff::Atmospheric { .. } = fog.falloff {
-            fog.falloff = FogFalloff::from_visibility_colors(cli.sky_fog_visibility, cli.sky_extinction_color, cli.sky_inscattering_color);
+            fog.falloff = FogFalloff::from_visibility_colors(visibility, cli.sky_extinction_color, cli.sky_inscattering_color);
         } else {
-            fog.falloff = FogFalloff::from_visibility_squared(cli.sky_fog_visibility / 4.0);
+            fog.falloff = FogFalloff::from_visibility_squared(visibility / 4.0);
         }
     }
 

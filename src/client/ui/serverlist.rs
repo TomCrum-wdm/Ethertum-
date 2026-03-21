@@ -191,8 +191,12 @@ pub fn ui_serverlist(
                                             server_item.addr.clone()
                                         } else if ui_server_info.gameplay_addr.starts_with(":") {
                                             // Concat: same ip but different port.
-                                            let i = server_item.addr.find(":").unwrap_or(server_item.addr.len());
-                                            format!("{}{}", &server_item.addr[0..i], ui_server_info.gameplay_addr)
+                                            let host = server_item
+                                                .addr
+                                                .find(':')
+                                                .and_then(|i| server_item.addr.get(0..i))
+                                                .unwrap_or(&server_item.addr);
+                                            format!("{}{}", host, ui_server_info.gameplay_addr)
                                         } else {
                                             ui_server_info.gameplay_addr.clone()
                                         });

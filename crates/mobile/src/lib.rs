@@ -30,9 +30,16 @@ fn main() {
 
     #[cfg(target_os = "android")]
     {
-        // Follow project default rendering path: force Vulkan on Android.
-        std::env::set_var("WGPU_BACKEND", "vulkan");
-        boot_log("set WGPU_BACKEND=vulkan");
+        // Keep backend selection adaptive on Android to reduce startup crashes on devices
+        // with incomplete Vulkan support. Respect explicit user/runtime override if provided.
+        match std::env::var("WGPU_BACKEND") {
+            Ok(current) if !current.trim().is_empty() => {
+                boot_log(&format!("keep WGPU_BACKEND={}", current));
+            }
+            _ => {
+                boot_log("WGPU_BACKEND not set, using runtime default backend selection");
+            }
+        }
     }
 
     #[cfg(target_os = "android")]

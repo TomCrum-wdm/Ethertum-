@@ -2,13 +2,17 @@ use bevy_egui::egui::Painter;
 use std::sync::Mutex;
 
 use crate::{
-    item::{Inventory, ItemStack},
+    item::{Inventory, ItemStack, Items},
     ui::prelude::*,
 };
 
 static UI_HOLDING_ITEM: Mutex<ItemStack> = Mutex::new(ItemStack { count: 0, item_id: 0 });
 
-pub fn draw_ui_holding_item(mut ctx: EguiContexts) {
+pub fn draw_ui_holding_item(mut ctx: EguiContexts, items: Option<Res<Items>>) {
+    let Some(items) = items else {
+        return;
+    };
+
     let Ok(hold) = UI_HOLDING_ITEM.lock() else {
         return;
     };
@@ -22,19 +26,21 @@ pub fn draw_ui_holding_item(mut ctx: EguiContexts) {
         };
         let size = vec2(50., 50.);
 
-        draw_item(&hold, Rect::from_min_size(curpos - size / 2., size), &ctx_mut.debug_painter());
+        draw_item(&hold, Rect::from_min_size(curpos - size / 2., size), &ctx_mut.debug_painter(), &items);
     }
 }
 
-pub fn draw_item(slot: &ItemStack, rect: Rect, painter: &Painter) {
-    let reg = unsafe { &*crate::item::_ITEMS_REG };
-    let num_all_items = reg.reg.len();
+pub fn draw_item(slot: &ItemStack, rect: Rect, painter: &Painter, items: &Items) {
+    let num_all_items = items.reg.len();
+    if num_all_items == 0 || slot.item_id == 0 {
+        return;
+    }
 
     // Item Texture
     let uv_siz = 1. / num_all_items as f32;
     let uv_x = uv_siz * (slot.item_id - 1) as f32;
     painter.image(
-        reg.atlas_egui,
+        items.atlas_egui,
         rect.shrink(3.),
         Rect::from_min_size(pos2(uv_x, 0.), vec2(uv_siz, 1.)),
         Color32::WHITE,
@@ -49,9 +55,8 @@ pub fn draw_item(slot: &ItemStack, rect: Rect, painter: &Painter) {
     );
 }
 
-pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack) {
-    let reg = unsafe { &*crate::item::_ITEMS_REG };
-    let num_all_items = reg.reg.len();
+pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack, items: &Items) {
+    let num_all_items = items.reg.len();
 
     let slot_btn = egui::Button::new("").fill(Color32::from_black_alpha(100));
     // if cli.hotbar_index == i {
@@ -64,13 +69,13 @@ pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack) {
     if !slot.is_empty() {
         // Tooltip
         resp = resp.on_hover_ui(|ui| {
-            if let Some(name) = reg.reg.at((slot.item_id - 1) as u16) {
+            if let Some(name) = items.reg.at((slot.item_id - 1) as u16) {
                 ui.label(name);
                 ui.small(format!("{} [{}/{}] x{}", name, slot.item_id, num_all_items, slot.count));
             }
         });
 
-        draw_item(slot, resp.rect, ui.painter())
+        draw_item(slot, resp.rect, ui.painter(), items)
     }
 
     if resp.clicked() {
@@ -78,17 +83,17 @@ pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack) {
             ItemStack::swap(&mut hold, slot);
         }
     } else if resp.secondary_clicked() {
-        crate::util::as_mut(slot).count += 1;
-        crate::util::as_mut(slot).item_id += 1;
+        slot.count += 1;
+        slot.item_id += 1;
     }
 }
 
-pub fn ui_inventory(ui: &mut egui::Ui, inv: &mut Inventory) -> InnerResponse<()> {
+pub fn ui_inventory(ui: &mut egui::Ui, inv: &mut Inventory, items: &Items) -> InnerResponse<()> {
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
         ui.style_mut().spacing.item_spacing = vec2(4., 4.);
 
         for item in inv.items.iter_mut() {
-            ui_item_stack(ui, item);
+            ui_item_stack(ui, item, items);
         }
     })
 }

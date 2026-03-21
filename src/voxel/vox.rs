@@ -1,6 +1,7 @@
 
 
 use crate::prelude::*;
+use std::sync::atomic::Ordering;
 
 // naming VoxelUnit?: BlockState, Cell, Voxel or Vox?
 #[derive(Clone, Copy)]
@@ -57,7 +58,7 @@ impl Vox {
     }
 
     pub fn is_cube(&self) -> bool {
-        self.shape_id == VoxShape::Cube || unsafe{super::meshgen::DBG_FORCE_BLOCKY}
+        self.shape_id == VoxShape::Cube || super::meshgen::DBG_FORCE_BLOCKY.load(Ordering::Relaxed)
     }
 
     pub fn isovalue(&self) -> f32 {

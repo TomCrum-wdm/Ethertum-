@@ -84,35 +84,31 @@ pub struct Items {
     pub iron_ingot: RegId,
 }
 
-// pub static mut _UI_ITEMS_ATLAS: bevy_egui::egui::TextureId = bevy_egui::egui::TextureId::Managed(0);
-pub static mut _ITEMS_REG: *const Items = std::ptr::null();
-
 fn setup_items(
-    items: ResMut<Items>,
+    mut items: ResMut<Items>,
     // mut reg: ResMut<Registry>,
     asset_server: Res<AssetServer>,
 ) {
-    let reg = crate::util::as_mut(&items.reg);
-    let items = crate::util::as_mut(&*items);
+    let reg = &mut items.reg;
     // Food
-    items.apple = reg.insert("apple");
+    let apple = reg.insert("apple");
     reg.insert("avocado"); // tmp
 
     // Material
-    items.coal = reg.insert("coal");
-    items.stick = reg.insert("stick");
+    let coal = reg.insert("coal");
+    let stick = reg.insert("stick");
 
     // Object
-    items.frame = reg.insert("frame");
-    items.lantern = reg.insert("lantern");
+    let frame = reg.insert("frame");
+    let lantern = reg.insert("lantern");
     // torch
 
     // Tool
-    items.pickaxe = reg.insert("pickaxe");
+    let pickaxe = reg.insert("pickaxe");
     // shovel
-    items.shears = reg.insert("shears");
-    items.grapple = reg.insert("grapple");
-    items.iron_ingot = reg.insert("iron_ingot");
+    let shears = reg.insert("shears");
+    let grapple = reg.insert("grapple");
+    let iron_ingot = reg.insert("iron_ingot");
 
     // below are temporary. Build should defer to PostStartup stage.:
 
@@ -120,11 +116,18 @@ fn setup_items(
     reg.build_num_id();
     info!("Registered {} items: {:?}", reg.len(), reg.vec);
 
+    items.apple = apple;
+    items.coal = coal;
+    items.stick = stick;
+    items.frame = frame;
+    items.lantern = lantern;
+    items.pickaxe = pickaxe;
+    items.shears = shears;
+    items.grapple = grapple;
+    items.iron_ingot = iron_ingot;
+
     items.atlas = asset_server.load("baked/items.png");
 
-    unsafe {
-        _ITEMS_REG = std::ptr::from_ref(items);
-    }
 }
 
 fn setup_items_egui(

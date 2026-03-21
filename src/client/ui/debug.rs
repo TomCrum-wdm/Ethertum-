@@ -9,6 +9,7 @@ use bevy_egui::{
 };
 use bevy_renet::renet::{RenetClient};
 use bevy_renet::{netcode::NetcodeClientTransport};
+use std::sync::atomic::Ordering;
 
 use crate::{
     client::prelude::*,
@@ -196,19 +197,22 @@ pub fn ui_menu_panel(
 
                                     lighting::compute_voxel_light(&mut queue, &mut Vec::new());
                                 }
-                                ui.toggle_value( unsafe{&mut voxel::meshgen::DBG_FORCE_BLOCKY}, "Is Force Blocky");
+                                let mut force_blocky = voxel::meshgen::DBG_FORCE_BLOCKY.load(Ordering::Relaxed);
+                                if ui.toggle_value(&mut force_blocky, "Is Force Blocky").changed() {
+                                    voxel::meshgen::DBG_FORCE_BLOCKY.store(force_blocky, Ordering::Relaxed);
+                                }
 
                                 if ui.button("ReMesh All Chunks").clicked() {
                                     // let ls = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
                                     for chunkpos in chunk_sys.get_chunks().keys() {
-                                        as_mut(&*chunk_sys).mark_chunk_remesh(*chunkpos);
+                                        chunk_sys.mark_chunk_remesh(*chunkpos);
                                     }
                                 }
                                 if ui.button("ReMesh Nr Chunks").clicked() {
                                     // let ls = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
                                     for chunkpos in chunk_sys.get_chunks().keys() {
                                         if voxel::is_chunk_in_load_distance(Chunk::as_chunkpos(campos), *chunkpos, IVec2::new(2,2)) {
-                                            as_mut(&*chunk_sys).mark_chunk_remesh(*chunkpos);
+                                            chunk_sys.mark_chunk_remesh(*chunkpos);
                                         }
                                     }
                                 }

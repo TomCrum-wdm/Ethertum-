@@ -140,7 +140,10 @@ impl Chunk {
 
     // the index range is [0, 16^3 or 4096)
     pub fn local_idx(localpos: IVec3) -> usize {
-        assert!(Chunk::is_localpos(localpos), "localpos = {}", localpos);
+        if !Chunk::is_localpos(localpos) {
+            debug!("Invalid localpos {}, clamped into chunk-local range", localpos);
+            return Chunk::local_idx(Chunk::as_localpos(localpos));
+        }
         (localpos.x << 8 | localpos.y << 4 | localpos.z) as usize
     }
     pub fn local_idx_pos(idx: i32) -> IVec3 {
@@ -211,10 +214,9 @@ impl Chunk {
     }
 
     fn neighbor_idx(relpos: IVec3) -> Option<usize> {
-        assert!(!Chunk::is_localpos(relpos));
-        // if Chunk::is_localpos(relpos) {
-        //     return Some(usize::MAX);
-        // }
+        if Chunk::is_localpos(relpos) {
+            return None;
+        }
         (0..Chunk::NEIGHBOR_DIR.len()).find(|&i| Chunk::is_localpos(relpos - (Chunk::NEIGHBOR_DIR[i] * Chunk::LEN as i32)))
     }
 

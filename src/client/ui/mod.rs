@@ -44,7 +44,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>();
         app.insert_resource(hud::ChatHistory::default());
-        if !app.is_plugin_added::<EguiPlugin>() || true {
+        if !app.is_plugin_added::<EguiPlugin>() {
             app.add_plugins(EguiPlugin::default());
         }
         
@@ -372,12 +372,18 @@ fn update_ui_scale_factor_system(
         return;
     };
     if keyboard_input.just_pressed(KeyCode::Slash) || toggle_scale_factor.is_none() {
-        *toggle_scale_factor = Some(!toggle_scale_factor.unwrap_or(true));
+        let use_default_scale = !toggle_scale_factor.unwrap_or(true);
+        *toggle_scale_factor = Some(use_default_scale);
 
-        let scale_factor = if toggle_scale_factor.unwrap_or(true) {
+        let scale_factor = if use_default_scale {
             1.0
         } else {
-            1.0 / camera.target_scaling_factor().unwrap_or(1.0)
+            let target = camera.target_scaling_factor().unwrap_or(1.0);
+            if target.is_finite() && target > f32::EPSILON {
+                1.0 / target
+            } else {
+                1.0
+            }
         };
         egui_settings.scale_factor = scale_factor;
     }

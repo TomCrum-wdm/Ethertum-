@@ -130,6 +130,13 @@ impl Default for CharacterController {
     }
 }
 
+#[derive(Default)]
+struct InputTimingState {
+    last_fly_jump: f32,
+    last_forward_press: f32,
+    last_jump: f32,
+}
+
 // fn handle_input(
 
 // ) {
@@ -154,12 +161,15 @@ fn input_move(
         &Rotation,
     )>,
     mut cam_dist_smoothed: Local<SmoothValue>,
+    mut input_timing: Local<InputTimingState>,
 ) {
     let mouse_delta = mouse_motion_events.read().fold(Vec2::ZERO, |acc, v| acc + v.delta);
     let wheel_delta = mouse_wheel_events.read().fold(0.0, |acc, v| acc + v.x + v.y);
     let dt_sec = time.delta_secs();
 
-    let action_state = query_input.single().unwrap();
+    let Ok(action_state) = query_input.single() else {
+        return;
+    };
 
     for (mut trans, mut ctl, mut linvel, mut gravity_scale, hits, rotation) in query.iter_mut() {
         // A Local-Space Movement.  Speed/Acceleration/Delta will applied later on this.
@@ -279,13 +289,10 @@ fn input_move(
             // Fly Toggle: Double Space
             let time_now = time.elapsed_secs();
             if is_jump_just_pressed {
-                unsafe {
-                    static mut LAST_FLY_JUMP: f32 = 0.;
-                    if time_now - LAST_FLY_JUMP < 0.3 {
-                        ctl.is_flying = !ctl.is_flying;
-                    }
-                    LAST_FLY_JUMP = time_now;
+                if time_now - input_timing.last_fly_jump < 0.3 {
+                    ctl.is_flying = !ctl.is_flying;
                 }
+                input_timing.last_fly_jump = time_now;
             }
             // UnFly on Touch Ground.
             if ctl.unfly_on_ground && ctl.is_grounded && ctl.is_flying {
@@ -303,24 +310,18 @@ fn input_move(
             // Sprint: Double W
             if input_key.just_pressed(KeyCode::KeyW) {
                 // todo: LastForward.
-                unsafe {
-                    static mut LAST_W: f32 = 0.;
-                    if time_now - LAST_W < 0.3 {
-                        ctl.is_sprinting = true;
-                    }
-                    LAST_W = time_now;
+                if time_now - input_timing.last_forward_press < 0.3 {
+                    ctl.is_sprinting = true;
                 }
+                input_timing.last_forward_press = time_now;
             }
 
             // Jump
             if is_jump_hold && ctl.is_grounded && !ctl.is_flying {
-                unsafe {
-                    static mut LAST_JUMP: f32 = 0.; // countdown
-                    if time_now - LAST_JUMP > 0.3 {
-                        linvel.0.y = ctl.jump_impulse; // apply jump vel
-                    }
-                    LAST_JUMP = time_now;
+                if time_now - input_timing.last_jump > 0.3 {
+                    linvel.0.y = ctl.jump_impulse; // apply jump vel
                 }
+                input_timing.last_jump = time_now;
                 // info!("JMP {:?}", linvel.0);
             }
 

@@ -11,7 +11,7 @@ use leafwing_input_manager::action_state::ActionState;
 use super::{meshgen, render::{self, FoliageMaterial, LiquidMaterial, TerrainMaterial}, ChannelRx, ChannelTx, Chunk, ChunkPtr, ChunkSystem, VoxShape};
 use crate::{
     client::prelude::*,
-    util::{as_mut, iter, AsMutRef},
+    util::{iter, AsMutRef},
 };
 
 pub struct ClientVoxelPlugin;
@@ -406,6 +406,7 @@ fn raycast(
     query_cam: Query<&GlobalTransform, With<CharacterControllerCamera>>, // ray
     query_player: Query<Entity, With<CharacterController>>,              // exclude collider
     mut hit_result: ResMut<HitResult>,
+    touches: Res<Touches>,
 
     query_input: Query<&ActionState<InputAction>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
@@ -454,7 +455,18 @@ fn raycast(
     let Ok(action_state) = query_input.single() else {
         return;
     };
+
+    #[cfg(target_os = "android")]
+    let touch_count_just_pressed = touches.iter_just_pressed().count();
+
+    #[cfg(target_os = "android")]
+    let do_break = action_state.just_pressed(&InputAction::Attack) || touch_count_just_pressed == 1;
+    #[cfg(not(target_os = "android"))]
     let do_break = action_state.just_pressed(&InputAction::Attack);
+
+    #[cfg(target_os = "android")]
+    let do_place = action_state.just_pressed(&InputAction::UseItem) || touch_count_just_pressed >= 2;
+    #[cfg(not(target_os = "android"))]
     let do_place = action_state.just_pressed(&InputAction::UseItem);
 
     if hit_result.is_hit && (do_break || do_place) {
@@ -614,8 +626,8 @@ impl ClientChunkSystem {
         }
     }
 
-    pub fn mark_chunk_remesh(&self, chunkpos: IVec3) {
-        as_mut(self).chunks_remesh.insert(chunkpos);
+    pub fn mark_chunk_remesh(&mut self, chunkpos: IVec3) {
+        self.chunks_remesh.insert(chunkpos);
     }
 
     pub fn spawn_chunk(&mut self, mut chunk: Chunk, cmds: &mut Commands, meshes: &mut Assets<Mesh>) {

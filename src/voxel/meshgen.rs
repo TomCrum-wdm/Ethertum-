@@ -1,4 +1,5 @@
 use std::f32::consts::PI;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::{
     math::{vec2, vec3},
@@ -8,10 +9,10 @@ use bevy::{
 use super::*;
 use crate::util::{iter, vtx::VertexBuffer};
 
-pub static mut DBG_FORCE_BLOCKY: bool = false;
+pub static DBG_FORCE_BLOCKY: AtomicBool = AtomicBool::new(false);
 
 pub fn generate_chunk_mesh(vbuf: &mut VertexBuffer, chunk: &Chunk) {
-    if unsafe{!DBG_FORCE_BLOCKY} {
+    if !DBG_FORCE_BLOCKY.load(Ordering::Relaxed) {
 
         sn::sn_contouring(vbuf, chunk);
     }
@@ -147,10 +148,9 @@ mod sn {
 
             if sn_signchanged(&c0, &c1) {
                 if let Some(t) = inverse_lerp(c0.isovalue()..=c1.isovalue(), 0.0) {
-                    // if !t.is_finite() {
-                    //     continue;
-                    // }
-                    assert!(t.is_finite(), "t = {}", t);
+                    if !t.is_finite() {
+                        continue;
+                    }
 
                     let p = t * (v1 - v0).as_vec3() + v0.as_vec3(); // (v1-v0) must > 0. since every edge vert are min-to-max
 
@@ -165,7 +165,9 @@ mod sn {
             // 由于外力修改 eg Water，可能存在非法情况 此时还不至于panic
             return Vec3::ONE * 0.5;
         }
-        assert!(fp_sum.is_finite());
+        if !fp_sum.is_finite() {
+            return Vec3::ONE * 0.5;
+        }
 
         fp_sum / (sign_changes as f32)
     }
