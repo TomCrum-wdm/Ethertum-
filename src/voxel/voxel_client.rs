@@ -686,7 +686,7 @@ impl ClientChunkSystem {
 
                 // set neighbor_chunks cache
                 chunk.neighbor_chunks[neib_idx] = {
-                    if let Some(neib_chunkptr) = self.get_chunk(neib_chunkpos) {
+                    if let Some(neib_chunkptr) = self.get_chunk(neib_chunkpos).cloned() {
                         let neib_chunk = neib_chunkptr.as_mut();
 
                         // update neighbor's `neighbor_chunk`
@@ -707,7 +707,7 @@ impl ClientChunkSystem {
                             }
                         }
                         
-                        Some(Arc::downgrade(neib_chunkptr))
+                        Some(Arc::downgrade(&neib_chunkptr))
                     } else {
                         None
                     }
