@@ -9,8 +9,11 @@ name = "mobile"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-bevy = { version = "0.17" }
+bevy = { version = "0.17", default-features = true, features = ["android-native-activity"] }
 ethertia = { path = "../..", default-features = false }
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.17", default-features = true, features = ["android-native-activity"] }
 
 [package.metadata.android]
 package = "com.ethertia.client"

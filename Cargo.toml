@@ -28,7 +28,11 @@ bevy = { version = "0.17.2", features = ["dynamic_linking", "file_watcher", "tra
 
 
 [dependencies]
-bevy = { version = "0.17.2", features = ["jpeg"] }
+bevy = { version = "0.17.2", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.17.2", default-features = false, features = ["android-native-activity", "jpeg"] }
+blake3 = { version = "1.5.1", features = ["pure"] }
 
 avian3d = "0.4.1"
 bevy_renet = "3.0"
@@ -77,9 +81,6 @@ bit-set = "0.8"
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
-
-[target.'cfg(target_os = "android")'.dependencies]
-blake3 = { version = "1.5.1", features = ["pure"] }
 
 [workspace]
 resolver = "2" # Important! wgpu/bevy needs this!
