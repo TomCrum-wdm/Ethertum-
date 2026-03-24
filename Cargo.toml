@@ -28,30 +28,22 @@ bevy = { version = "0.17.2", features = ["dynamic_linking", "file_watcher", "tra
 
 
 [dependencies]
-bevy = { version = "0.17.2", default-features = false, features = ["jpeg"] }
-
-[target.'cfg(target_os = "android")'.dependencies]
-bevy = { version = "0.17.2", default-features = false, features = ["android-native-activity", "jpeg"] }
+bevy = { version = "0.17.2", default-features = true, features = ["jpeg"] }
 blake3 = { version = "1.5.1", features = ["pure"] }
-
 avian3d = "0.4.1"
 bevy_renet = "3.0"
 # bevy_fps_controller = "0.2.3"
 # bevy_rapier3d = "0.23"
 
-#bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
-#bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
 bevy_egui = "0.38"
 bevy-inspector-egui = { version = "0.34", optional = true }
 bevy_editor_pls = { version = "0.10", optional = true }
 egui_extras = { version = "0.33", default-features = false, features = [] }
 egui-notify = "0.21"
 leafwing-input-manager = { version = "0.18" }
-
 bevy_atmosphere = { version = "0.13", optional = true }
 bevy_common_assets = { version = "0.14", features = ["json"] }
 bevy_obj = "0.17"
-
 noise = "0.9"
 bincode = "1.3"
 serde = "1.0"
@@ -59,11 +51,9 @@ serde_json = "1.0"
 image = "0.25"  # for atlas gen
 tiny_http = "0.12"  # for RCON http server
 half ="2.7"
-
 thread_local = "1.1"
 once_cell = "1.19"
 futures-lite = "2.0.1"  # async poll task
-
 sysinfo = { version = "0.37", optional = true }
 native-dialog = { version = "0.9", optional = true }
 memory-stats = { version = "1.2", optional = true }
@@ -72,15 +62,24 @@ env_logger = "0.11"
 chrono = "0.4"
 anyhow = "1.0"  # error handling
 human_bytes = "0.4"
-
 rand = "0.9"
 instant = "0.1"
 crossbeam-channel = "0.5"
 shlex = "1.3"
 bit-set = "0.8"
-
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "0.17.2", default-features = false, features = ["android-native-activity", "jpeg"] }
+
+#bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
+#bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
+
+
+
+
+
+
 
 [workspace]
 resolver = "2" # Important! wgpu/bevy needs this!
