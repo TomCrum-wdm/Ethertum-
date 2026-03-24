@@ -9,7 +9,10 @@ name = "mobile"
 crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-bevy = { version = "0.17", default-features = false, features = [
+# Force stable android glue mode. Do not enable `android-game-activity`, it conflicts
+# with `android-native-activity` in android-activity v0.6.
+android-activity = { version = "0.6.0", default-features = false, features = ["native-activity"] }
+bevy = { version = "0.17.2", default-features = false, features = [
     "android-native-activity",
     "android_shared_stdcxx",
     "animation",
