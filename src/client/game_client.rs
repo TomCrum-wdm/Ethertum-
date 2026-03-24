@@ -64,7 +64,7 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
-        #[cfg(not(target_os = "android"))]
+        // Enable integrated local server on all platforms, including Android.
         app.add_plugins(IntegratedServerPlugin);
         
         // ClientInfo

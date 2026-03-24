@@ -53,13 +53,9 @@ fn main() {
 
     let mut primary_window = Window {
         resizable: false,
+        mode: bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary),
         ..default()
     };
-
-    #[cfg(not(target_os = "android"))]
-    {
-        primary_window.mode = bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary);
-    }
 
     #[cfg(target_os = "android")]
     boot_log("primary window configured");
