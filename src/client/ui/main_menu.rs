@@ -46,18 +46,35 @@ pub fn ui_main_menu(
     // let img = ctx.add_image(asset_server.load("proto.png"));
 
     if cfg.touch_ui {
-        egui::SidePanel::left("touch_ui_sidebar").resizable(false).show(ctx_mut, |ui| {
+        let safe_top = crate::ui::ui_safe_top();
+        egui::SidePanel::left("touch_ui_sidebar")
+            .resizable(false)
+            .min_width(300.0)
+            .default_width(320.0)
+            .show(ctx_mut, |ui| {
             ui.vertical_centered_justified(|ui| {
-                ui.add_space(24.);
-                ui.add_sized([220., 80.], egui::Button::new("Singleplayer"));
-                if ui.button("Multiplayer").clicked() { cli.curr_ui = CurrentUI::ServerList; }
-                if ui.button("Settings").clicked() { cli.curr_ui = CurrentUI::Settings; }
-                if ui.button("Terminate").clicked() { app_exit_events.write(AppExit::Success); }
+                ui.add_space((safe_top + 24.0).max(24.0));
+                if ui.add_sized([280., 72.], egui::Button::new("Singleplayer")).clicked() {
+                    cli.curr_ui = CurrentUI::LocalWorldList;
+                }
+                ui.add_space(10.0);
+                if ui.add_sized([280., 72.], egui::Button::new("Multiplayer")).clicked() {
+                    cli.curr_ui = CurrentUI::ServerList;
+                }
+                ui.add_space(10.0);
+                if ui.add_sized([280., 72.], egui::Button::new("Settings")).clicked() {
+                    cli.curr_ui = CurrentUI::Settings;
+                }
+                ui.add_space(10.0);
+                if ui.add_sized([280., 72.], egui::Button::new("Terminate")).clicked() {
+                    app_exit_events.write(AppExit::Success);
+                }
             });
         });
 
         egui::CentralPanel::default().show(ctx_mut, |ui| {
             ui.vertical_centered(|ui| {
+                ui.add_space(safe_top * 0.5);
                 ui.add(egui::Label::new(RichText::new("ethertia").heading().color(Color32::WHITE)));
                 ui.label("Touch UI mode enabled");
             });

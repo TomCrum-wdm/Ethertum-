@@ -54,7 +54,7 @@ fn main() {
     let mut primary_window = Window {
         resizable: false,
         mode: if cfg!(target_os = "android") {
-            bevy::window::WindowMode::Fullscreen(bevy::window::MonitorSelection::Primary, bevy::window::VideoModeSelection::Current)
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary)
         } else {
             bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary)
         },

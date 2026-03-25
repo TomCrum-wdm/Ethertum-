@@ -19,6 +19,7 @@ pub mod prelude {
 use bevy::{
     diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     prelude::*,
+    window::PrimaryWindow,
 };
 use bevy::post_process::bloom::Bloom;
 use bevy::anti_alias::fxaa::Fxaa;
@@ -56,13 +57,14 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Startup,
-                (configure_visuals_system, configure_ui_state_system),
+                (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system),
             )
+            .add_systems(PreUpdate, sync_ui_window_metrics_system)
             .add_systems(
                 EguiPrimaryContextPass,
                 (
                     /* test */
-                    (ui_example_system, update_ui_scale_factor_system),
+                    ui_example_system,
                     /* debug */
                     debug::ui_menu_panel.run_if(|cli: Res<ClientInfo>| cli.dbg_menubar),
                     debug::hud_debug_text.run_if(|cli: Res<ClientInfo>| cli.dbg_text).before(debug::ui_menu_panel),
@@ -158,6 +160,7 @@ pub enum CurrentUI {
 
 // Shared UI runtime state that may be touched from multiple systems.
 static UI_WINDOW_SIZE: Mutex<Vec2> = Mutex::new(Vec2::ZERO);
+static UI_SAFE_TOP: Mutex<f32> = Mutex::new(0.0);
 
 struct UiSfxState {
     hovered_id: egui::Id,
@@ -190,6 +193,20 @@ pub fn set_window_size(size: Vec2) {
     }
 }
 
+pub fn set_ui_safe_top(v: f32) {
+    if let Ok(mut top) = UI_SAFE_TOP.lock() {
+        *top = v.max(0.0);
+    }
+}
+
+pub fn ui_safe_top() -> f32 {
+    if cfg!(target_os = "android") {
+        UI_SAFE_TOP.lock().map(|v| *v).unwrap_or(42.0).max(32.0)
+    } else {
+        0.0
+    }
+}
+
 pub fn new_egui_window(title: &str) -> egui::Window {
     let size = [680., 420.];
 
@@ -203,13 +220,15 @@ pub fn new_egui_window(title: &str) -> egui::Window {
     let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
 
     if cfg!(target_os = "android") {
-        let w = window_size.clamp(Vec2::new(200.0, 140.0), window_size);
+        let safe_top = ui_safe_top();
+        let width = window_size.x.max(320.0);
+        let height = (window_size.y - safe_top).max(220.0);
         return egui::Window::new(title)
-            .fixed_size([w.x, w.y])
+            .fixed_size([width, height])
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .anchor(Align2::LEFT_TOP, [0., 0.]);
+            .anchor(Align2::LEFT_TOP, [0., safe_top]);
     }
 
     if window_size.x - size[0] < 100. || window_size.y - size[1] < 100. {
@@ -374,29 +393,26 @@ fn configure_ui_state_system(mut ui_state: ResMut<UiState>) {
     ui_state.is_window_open = true;
 }
 
-fn update_ui_scale_factor_system(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut toggle_scale_factor: Local<Option<bool>>,
+fn init_ui_scale_factor_system(
     mut query_egui_camera: Query<(&mut EguiContextSettings, &Camera)>,
 ) {
-    let Ok((mut egui_settings, camera)) = query_egui_camera.single_mut() else {
+    let Ok((mut egui_settings, _camera)) = query_egui_camera.single_mut() else {
         return;
     };
-    if keyboard_input.just_pressed(KeyCode::Slash) || toggle_scale_factor.is_none() {
-        let use_default_scale = !toggle_scale_factor.unwrap_or(true);
-        *toggle_scale_factor = Some(use_default_scale);
 
-        let scale_factor = if use_default_scale {
-            1.0
-        } else {
-            let target = camera.target_scaling_factor().unwrap_or(1.0);
-            if target.is_finite() && target > f32::EPSILON {
-                1.0 / target
-            } else {
-                1.0
-            }
-        };
-        egui_settings.scale_factor = scale_factor;
+    // Keep touch UI readable and avoid inverse-DPI shrinking at startup.
+    egui_settings.scale_factor = if cfg!(target_os = "android") { 1.2 } else { 1.0 };
+}
+
+fn sync_ui_window_metrics_system(query_window: Query<&Window, With<PrimaryWindow>>) {
+    let Ok(window) = query_window.single() else {
+        return;
+    };
+
+    set_window_size(Vec2::new(window.resolution.width(), window.resolution.height()));
+    if cfg!(target_os = "android") {
+        let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
+        set_ui_safe_top(safe_top);
     }
 }
 
@@ -461,7 +477,8 @@ fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played
 
 // UI Panel: Left-Navs and Right-Content
 pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui), mut add_main: impl FnMut(&mut Ui)) {
-    let mut builder = StripBuilder::new(ui).size(Size::exact(120.0)); // Left
+    let nav_width = if cfg!(target_os = "android") { 180.0 } else { 120.0 };
+    let mut builder = StripBuilder::new(ui).size(Size::exact(nav_width)); // Left
     if separator {
         builder = builder.size(Size::exact(0.0)); // Separator
     }
@@ -481,7 +498,12 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                     });
                     strip.cell(|ui| {
                         ui.with_layout(Layout::bottom_up(egui::Align::Min), |ui| {
-                            if sfx_play(ui.selectable_label(false, "⬅Back")).clicked() {
+                            let back_resp = if cfg!(target_os = "android") {
+                                sfx_play(ui.add_sized([140.0, 46.0], egui::Button::new("Back")))
+                            } else {
+                                sfx_play(ui.selectable_label(false, "⬅Back"))
+                            };
+                            if back_resp.clicked() {
                                 if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
                                     sfx_state.back_requested = true;
                                 }
@@ -532,7 +554,11 @@ impl UiExtra for Ui {
     }
     fn btn_normal(&mut self, text: impl Into<WidgetText>) -> Response {
         self.add_space(4.);
-        sfx_play(self.add_sized([220., 24.], egui::Button::new(text)))
+        if cfg!(target_os = "android") {
+            sfx_play(self.add_sized([320., 56.], egui::Button::new(text)))
+        } else {
+            sfx_play(self.add_sized([220., 24.], egui::Button::new(text)))
+        }
     }
     fn btn_borderless(&mut self, text: impl Into<WidgetText>) -> Response {
         sfx_play(self.add(egui::SelectableLabel::new(false, text)))
