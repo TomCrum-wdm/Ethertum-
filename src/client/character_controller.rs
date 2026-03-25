@@ -190,11 +190,19 @@ fn input_move(
                 ctl.yaw -= mouse_delta.x;
             }
 
-            // Touch drag look on non-android platforms, or when Android touch-ui is disabled.
-            if !cfg!(target_os = "android") || !cfg.touch_ui {
+            // Touch look handling.
+            if cfg!(target_os = "android") && cfg.touch_ui {
+                for touch in touches.iter() {
+                    if touch_sticks.move_touch_id == Some(touch.id()) {
+                        continue;
+                    }
+                    let mov = touch.delta();
+                    ctl.pitch -= look_sensitivity * mov.y;
+                    ctl.yaw -= look_sensitivity * mov.x;
+                }
+            } else {
                 for touch in touches.iter() {
                     let mov = touch.delta();
-
                     ctl.pitch -= look_sensitivity * mov.y;
                     ctl.yaw -= look_sensitivity * mov.x;
                 }
@@ -209,8 +217,8 @@ fn input_move(
                 ctl.yaw -= look_sensitivity * axis_value.x;
 
                 if touch_sticks.active {
-                    ctl.pitch += look_sensitivity * touch_sticks.look_axis.y;
-                    ctl.yaw -= look_sensitivity * touch_sticks.look_axis.x;
+                    // For Android touch UI, look is handled by direct finger drag; no right-touch stick.
+                    // Keep move axis only from left joystick.
                 }
             }
 

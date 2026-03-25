@@ -37,13 +37,12 @@ impl Plugin for ClientGamePlugin {
                 //app.insert_resource(Msaa::Off);
                 app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
             }
-            
-            // Billiboard
-            // use bevy_mod_billboard::prelude::*;
-            // app.add_plugins(BillboardPlugin);
-            
-            // ShadowMap sizes
-            app.insert_resource(DirectionalLightShadowMap { size: 1024 });
+        #[cfg(target_os = "android")]
+        {
+            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::forward());
+            app.insert_resource(AmbientLight { brightness: 1.8, ..default() });
+            app.insert_resource(ClearColor(Color::rgb(0.06, 0.09, 0.12)));
+        }
             
             // SSAO
             // app.add_plugins(TemporalAntiAliasPlugin);

@@ -13,11 +13,8 @@ use crate::prelude::*;
 #[derive(Resource, Debug, Clone)]
 pub struct TouchStickState {
     pub move_axis: Vec2,
-    pub look_axis: Vec2,
     pub move_center: Vec2,
-    pub look_center: Vec2,
     pub move_touch_id: Option<u64>,
-    pub look_touch_id: Option<u64>,
     pub radius: f32,
     pub dead_zone: f32,
     pub active: bool,
@@ -27,13 +24,10 @@ impl Default for TouchStickState {
     fn default() -> Self {
         Self {
             move_axis: Vec2::ZERO,
-            look_axis: Vec2::ZERO,
             move_center: Vec2::ZERO,
-            look_center: Vec2::ZERO,
             move_touch_id: None,
-            look_touch_id: None,
-            radius: 108.0,
-            dead_zone: 0.12,
+            radius: 120.0,
+            dead_zone: 0.1,
             active: false,
         }
     }
@@ -104,49 +98,34 @@ fn update_touch_sticks(
     }
 
     let size = Vec2::new(window.resolution.width(), window.resolution.height());
-    state.move_center = Vec2::new(size.x * 0.20, size.y * 0.80);
-    state.look_center = Vec2::new(size.x * 0.80, size.y * 0.80);
+    let left_bottom_area = Rect {
+        min: Vec2::new(0., size.y * 0.55),
+        max: Vec2::new(size.x * 0.5, size.y),
+    };
 
-    let mut move_touch = None;
-    let mut look_touch = None;
-
-    for touch in touches.iter() {
-        let id = touch.id();
-        if Some(id) == state.move_touch_id {
-            move_touch = Some(touch.position());
+    // Keep an adaptive move stick center where touch started in left-bottom area.
+    if let Some(id) = state.move_touch_id {
+        if let Some(touch) = touches.iter().find(|t| t.id() == id) {
+            state.move_center = touch.position();
+        } else {
+            state.move_touch_id = None;
         }
-        if Some(id) == state.look_touch_id {
-            look_touch = Some(touch.position());
-        }
-    }
-
-    if move_touch.is_none() {
-        state.move_touch_id = None;
-    }
-    if look_touch.is_none() {
-        state.look_touch_id = None;
     }
 
     if state.move_touch_id.is_none() {
-        if let Some(touch) = touches.iter().find(|t| t.position().x <= size.x * 0.5) {
+        if let Some(touch) = touches.iter().find(|t| left_bottom_area.contains(t.position())) {
             state.move_touch_id = Some(touch.id());
-            move_touch = Some(touch.position());
+            state.move_center = touch.position();
         }
     }
-    if state.look_touch_id.is_none() {
-        if let Some(touch) = touches.iter().find(|t| t.position().x > size.x * 0.5) {
-            state.look_touch_id = Some(touch.id());
-            look_touch = Some(touch.position());
-        }
-    }
+
+    let move_touch = state.move_touch_id.and_then(|id| touches.iter().find(|t| t.id() == id).map(|t| t.position()));
 
     state.move_axis = move_touch
         .map(|p| stick_axis_from_touch(p, state.move_center, state.radius, state.dead_zone))
         .unwrap_or(Vec2::ZERO);
-    state.look_axis = look_touch
-        .map(|p| stick_axis_from_touch(p, state.look_center, state.radius, state.dead_zone))
-        .unwrap_or(Vec2::ZERO);
 }
+
 
 #[derive(Default, Reflect, Hash, Clone, PartialEq, Eq)]
 pub enum InputStickId {
@@ -241,14 +220,12 @@ pub fn input_handle(
         return;
     };
 
-    // ESC
-    if action_state.just_pressed(&InputAction::ESC) {
-        if worldinfo.is_some() {
-            cli.curr_ui = if cli.curr_ui == CurrentUI::None {
-                CurrentUI::PauseMenu
-            } else {
-                CurrentUI::None
-            };
+    // ESC or Android back button
+    if action_state.just_pressed(&InputAction::ESC) || key.just_pressed(KeyCode::Escape) {
+        if cli.curr_ui == CurrentUI::MainMenu {
+            // on main menu ESC should exit app, not close.
+        } else if cli.curr_ui == CurrentUI::None {
+            cli.curr_ui = CurrentUI::PauseMenu;
         } else {
             cli.curr_ui = CurrentUI::MainMenu;
         }

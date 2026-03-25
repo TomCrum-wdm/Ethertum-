@@ -338,5 +338,5 @@ pub fn hud_touch_sticks(mut ctx: EguiContexts, cfg: Res<ClientSettings>, cli: Re
     };
 
     draw_stick(sticks.move_center, sticks.move_axis);
-    draw_stick(sticks.look_center, sticks.look_axis);
 }
+
