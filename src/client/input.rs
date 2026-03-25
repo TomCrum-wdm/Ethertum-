@@ -17,77 +17,14 @@ pub fn init(app: &mut App) {
 
     #[cfg(target_os = "android")]
     {
-        app.add_plugins(bevy_touch_stick::TouchStickPlugin::<InputStickId>::default());
+        // bevy_touch_stick 0.2 depends on bevy 0.13 and is not compatible with bevy 0.17.
+        // Keep the startup hook so Android-specific input UI can be reintroduced with a compatible implementation.
         app.add_systems(Startup, setup_touch_sticks);
     }
 }
 
 #[cfg(target_os = "android")]
-fn setup_touch_sticks(mut cmds: Commands, asset_server: Res<AssetServer>) {
-    // Left move stick
-    cmds.spawn((
-        Name::new("InputStickMove"),
-        bevy_touch_stick::DespawnOnWorldUnload,
-        bevy_touch_stick::TouchStickGamepadMapping::LEFT_STICK,
-        bevy_touch_stick::TouchStickUiBundle {
-            style: Style {
-                width: Val::Px(150.),
-                height: Val::Px(150.),
-                position_type: PositionType::Absolute,
-                left: Val::Percent(10.),
-                bottom: Val::Percent(10.),
-                ..default()
-            },
-            ..default()
-        },
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            bevy_touch_stick::TouchStickUiKnob,
-            ImageBundle {
-                // replace with actual asset if available
-                image: asset_server.load("knob.png").into(),
-                style: Style {
-                    width: Val::Px(75.),
-                    height: Val::Px(75.),
-                    ..default()
-                },
-                ..default()
-            },
-        ));
-    });
-
-    // Right look stick
-    cmds.spawn((
-        Name::new("InputStickLook"),
-        bevy_touch_stick::DespawnOnWorldUnload,
-        bevy_touch_stick::TouchStickGamepadMapping::RIGHT_STICK,
-        bevy_touch_stick::TouchStickUiBundle {
-            style: Style {
-                width: Val::Px(150.),
-                height: Val::Px(150.),
-                position_type: PositionType::Absolute,
-                right: Val::Percent(10.),
-                bottom: Val::Percent(10.),
-                ..default()
-            },
-            ..default()
-        },
-    ))
-    .with_children(|parent| {
-        parent.spawn((
-            bevy_touch_stick::TouchStickUiKnob,
-            ImageBundle {
-                image: asset_server.load("knob.png").into(),
-                style: Style {
-                    width: Val::Px(75.),
-                    height: Val::Px(75.),
-                    ..default()
-                },
-                ..default()
-            },
-        ));
-    });
+fn setup_touch_sticks(_cmds: Commands, _asset_server: Res<AssetServer>) {
 }
 
 #[derive(Default, Reflect, Hash, Clone, PartialEq, Eq)]
