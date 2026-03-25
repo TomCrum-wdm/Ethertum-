@@ -71,6 +71,8 @@ pub struct ClientSettings {
     pub username: String,
     pub hud_padding: f32,
     pub vsync: bool,
+    pub high_quality_rendering: bool,
+    pub touch_ui: bool,
 
     pub chunks_load_distance: IVec2,
 }
@@ -83,6 +85,8 @@ impl Default for ClientSettings {
             username: crate::util::generate_simple_user_name(),
             hud_padding: 24.,
             vsync: true,
+            high_quality_rendering: true,
+            touch_ui: true,
 
             chunks_load_distance: IVec2::new(4, 3),
         }

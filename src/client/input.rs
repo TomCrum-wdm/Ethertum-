@@ -1,3 +1,4 @@
+use bevy::prelude::*;
 use bevy::window::*;
 use leafwing_input_manager::prelude::*;
 use leafwing_input_manager::action_state::ActionState;
@@ -12,8 +13,81 @@ use crate::prelude::*;
 pub fn init(app: &mut App) {
     app.add_systems(Startup, super::input::input_setup);
     app.add_systems(Update, super::input::input_handle);
-    app.add_plugins(leafwing_input_manager::plugin::InputManagerPlugin::<InputAction>::default());
-    // app.add_plugins((bevy_touch_stick::TouchStickPlugin::<InputStickId>::default());
+    app.add_plugins(InputManagerPlugin::<InputAction>::default());
+
+    #[cfg(target_os = "android")]
+    {
+        app.add_plugins(bevy_touch_stick::TouchStickPlugin::<InputStickId>::default());
+        app.add_systems(Startup, setup_touch_sticks);
+    }
+}
+
+#[cfg(target_os = "android")]
+fn setup_touch_sticks(mut cmds: Commands, asset_server: Res<AssetServer>) {
+    // Left move stick
+    cmds.spawn((
+        Name::new("InputStickMove"),
+        bevy_touch_stick::DespawnOnWorldUnload,
+        bevy_touch_stick::TouchStickGamepadMapping::LEFT_STICK,
+        bevy_touch_stick::TouchStickUiBundle {
+            style: Style {
+                width: Val::Px(150.),
+                height: Val::Px(150.),
+                position_type: PositionType::Absolute,
+                left: Val::Percent(10.),
+                bottom: Val::Percent(10.),
+                ..default()
+            },
+            ..default()
+        },
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            bevy_touch_stick::TouchStickUiKnob,
+            ImageBundle {
+                // replace with actual asset if available
+                image: asset_server.load("knob.png").into(),
+                style: Style {
+                    width: Val::Px(75.),
+                    height: Val::Px(75.),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+    });
+
+    // Right look stick
+    cmds.spawn((
+        Name::new("InputStickLook"),
+        bevy_touch_stick::DespawnOnWorldUnload,
+        bevy_touch_stick::TouchStickGamepadMapping::RIGHT_STICK,
+        bevy_touch_stick::TouchStickUiBundle {
+            style: Style {
+                width: Val::Px(150.),
+                height: Val::Px(150.),
+                position_type: PositionType::Absolute,
+                right: Val::Percent(10.),
+                bottom: Val::Percent(10.),
+                ..default()
+            },
+            ..default()
+        },
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            bevy_touch_stick::TouchStickUiKnob,
+            ImageBundle {
+                image: asset_server.load("knob.png").into(),
+                style: Style {
+                    width: Val::Px(75.),
+                    height: Val::Px(75.),
+                    ..default()
+                },
+                ..default()
+            },
+        ));
+    });
 }
 
 #[derive(Default, Reflect, Hash, Clone, PartialEq, Eq)]

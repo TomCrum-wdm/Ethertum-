@@ -93,6 +93,7 @@ pub fn ui_settings(
                         ui.label("Profile: ");
 
                         ui_setting_line(ui, "Username", egui::TextEdit::singleline(&mut cfg.username));
+                        ui_setting_line(ui, "Touch UI (large buttons)", egui::Checkbox::new(&mut cfg.touch_ui, ""));
 
                         // ui.group(|ui| {
                         //     ui.horizontal(|ui| {

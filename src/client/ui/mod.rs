@@ -201,6 +201,17 @@ pub fn new_egui_window(title: &str) -> egui::Window {
         .collapsible(false);
 
     let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
+
+    if cfg!(target_os = "android") {
+        let w = window_size.clamp(Vec2::new(200.0, 140.0), window_size);
+        return egui::Window::new(title)
+            .fixed_size([w.x, w.y])
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::LEFT_TOP, [0., 0.]);
+    }
+
     if window_size.x - size[0] < 100. || window_size.y - size[1] < 100. {
         w = w.fixed_size([window_size.x - 12., window_size.y - 12.]).resizable(false);
     }

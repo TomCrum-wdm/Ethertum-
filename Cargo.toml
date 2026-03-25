@@ -41,6 +41,7 @@ bevy_editor_pls = { version = "0.10", optional = true }
 egui_extras = { version = "0.33", default-features = false, features = [] }
 egui-notify = "0.21"
 leafwing-input-manager = { version = "0.18" }
+bevy_touch_stick = "0.2"
 bevy_atmosphere = { version = "0.13", optional = true }
 bevy_common_assets = { version = "0.14", features = ["json"] }
 bevy_obj = "0.17"

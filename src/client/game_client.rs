@@ -20,6 +20,9 @@ impl Plugin for ClientGamePlugin {
     fn build(&self, app: &mut App) {
         // Render
         {
+            app.insert_resource(AmbientLight { brightness: 1.0, ..default() });
+            app.insert_resource(ClearColor(Color::BLACK));
+
             // Atmosphere
             #[cfg(feature = "target_native_os")]
             {
@@ -93,7 +96,16 @@ impl Plugin for ClientGamePlugin {
 
         #[cfg(feature = "ddgi")]
         app.add_plugins(DDGIPlugin);
+
+        app.add_systems(Startup, apply_graphics_settings);
     }
+}
+
+fn apply_graphics_settings(
+    cfg: Res<ClientSettings>,
+    mut ambient: ResMut<AmbientLight>,
+) {
+    ambient.brightness = if cfg.high_quality_rendering { 1.25 } else { 0.8 };
 }
 
 #[cfg(target_os = "android")]

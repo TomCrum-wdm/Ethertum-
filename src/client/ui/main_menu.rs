@@ -45,10 +45,26 @@ pub fn ui_main_menu(
     // }
     // let img = ctx.add_image(asset_server.load("proto.png"));
 
-    egui::CentralPanel::default().show(ctx_mut, |ui| {
-        let h = ui.available_height();
+    if cfg.touch_ui {
+        egui::SidePanel::left("touch_ui_sidebar").resizable(false).show(ctx_mut, |ui| {
+            ui.vertical_centered_justified(|ui| {
+                ui.add_space(24.);
+                ui.add_sized([220., 80.], egui::Button::new("Singleplayer"));
+                if ui.button("Multiplayer").clicked() { cli.curr_ui = CurrentUI::ServerList; }
+                if ui.button("Settings").clicked() { cli.curr_ui = CurrentUI::Settings; }
+                if ui.button("Terminate").clicked() { app_exit_events.write(AppExit::Success); }
+            });
+        });
 
-        // ui.painter().image(
+        egui::CentralPanel::default().show(ctx_mut, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Label::new(RichText::new("ethertia").heading().color(Color32::WHITE)));
+                ui.label("Touch UI mode enabled");
+            });
+        });
+    } else {
+        egui::CentralPanel::default().show(ctx_mut, |ui| {
+            let h = ui.available_height();
         //     img,
         //     Rect::from_min_size(pos2(100., 100.), vec2(200., 200.)),
         //     Rect::from_min_size(pos2(0., 0.), vec2(1., 1.)),
@@ -147,6 +163,7 @@ pub fn ui_main_menu(
             ui.label(format!("v{}\n0 mods loaded.", crate::VERSION));
         });
     });
+    }
 }
 
 pub fn ui_pause_menu(
@@ -241,5 +258,4 @@ pub fn ui_pause_menu(
     //         //     if ui.add_sized([200., 20.], egui::Button::new("Back to Title")).clicked() {
     //         //     }
     //         // });
-    //     });
 }

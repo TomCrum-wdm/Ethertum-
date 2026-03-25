@@ -53,12 +53,16 @@ fn main() {
 
     let mut primary_window = Window {
         resizable: false,
-        mode: bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary),
+        mode: if cfg!(target_os = "android") {
+            bevy::window::WindowMode::Fullscreen(bevy::window::MonitorSelection::Primary, bevy::window::VideoModeSelection::Current)
+        } else {
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary)
+        },
         ..default()
     };
 
     #[cfg(target_os = "android")]
-    boot_log("primary window configured");
+    boot_log("primary window configured fullscreen");
 
     let mut default_plugins = DefaultPlugins.set(WindowPlugin {
         primary_window: Some(primary_window),
