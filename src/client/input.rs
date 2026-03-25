@@ -10,21 +10,142 @@ use crate::client::prelude::*;
 use crate::client::ui::*;
 use crate::prelude::*;
 
+#[derive(Resource, Debug, Clone)]
+pub struct TouchStickState {
+    pub move_axis: Vec2,
+    pub look_axis: Vec2,
+    pub move_center: Vec2,
+    pub look_center: Vec2,
+    pub move_touch_id: Option<u64>,
+    pub look_touch_id: Option<u64>,
+    pub radius: f32,
+    pub dead_zone: f32,
+    pub active: bool,
+}
+
+impl Default for TouchStickState {
+    fn default() -> Self {
+        Self {
+            move_axis: Vec2::ZERO,
+            look_axis: Vec2::ZERO,
+            move_center: Vec2::ZERO,
+            look_center: Vec2::ZERO,
+            move_touch_id: None,
+            look_touch_id: None,
+            radius: 108.0,
+            dead_zone: 0.12,
+            active: false,
+        }
+    }
+}
+
 pub fn init(app: &mut App) {
     app.add_systems(Startup, super::input::input_setup);
     app.add_systems(Update, super::input::input_handle);
     app.add_plugins(InputManagerPlugin::<InputAction>::default());
+    app.insert_resource(TouchStickState::default());
 
     #[cfg(target_os = "android")]
     {
         // bevy_touch_stick 0.2 depends on bevy 0.13 and is not compatible with bevy 0.17.
         // Keep the startup hook so Android-specific input UI can be reintroduced with a compatible implementation.
         app.add_systems(Startup, setup_touch_sticks);
+        app.add_systems(PreUpdate, update_touch_sticks);
     }
 }
 
 #[cfg(target_os = "android")]
 fn setup_touch_sticks(_cmds: Commands, _asset_server: Res<AssetServer>) {
+}
+
+#[cfg(target_os = "android")]
+fn stick_axis_from_touch(position: Vec2, center: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
+    if radius <= 0.0 {
+        return Vec2::ZERO;
+    }
+
+    // Window/touch space is y-down; gameplay look/move uses y-up.
+    let delta = position - center;
+    let mut axis = Vec2::new(delta.x, -delta.y) / radius;
+    let len = axis.length();
+    if len > 1.0 {
+        axis /= len;
+    }
+    if axis.length() < dead_zone {
+        Vec2::ZERO
+    } else {
+        axis
+    }
+}
+
+#[cfg(target_os = "android")]
+fn update_touch_sticks(
+    touches: Res<Touches>,
+    mut state: ResMut<TouchStickState>,
+    query_window: Query<&Window, With<PrimaryWindow>>,
+    cli: Res<ClientInfo>,
+    cfg: Res<ClientSettings>,
+) {
+    let Ok(window) = query_window.single() else {
+        state.move_axis = Vec2::ZERO;
+        state.look_axis = Vec2::ZERO;
+        state.active = false;
+        return;
+    };
+
+    let enabled = cfg.touch_ui && cli.curr_ui == CurrentUI::None;
+    state.active = enabled;
+    if !enabled {
+        state.move_axis = Vec2::ZERO;
+        state.look_axis = Vec2::ZERO;
+        state.move_touch_id = None;
+        state.look_touch_id = None;
+        return;
+    }
+
+    let size = Vec2::new(window.resolution.width(), window.resolution.height());
+    state.move_center = Vec2::new(size.x * 0.20, size.y * 0.80);
+    state.look_center = Vec2::new(size.x * 0.80, size.y * 0.80);
+
+    let mut move_touch = None;
+    let mut look_touch = None;
+
+    for touch in touches.iter() {
+        let id = touch.id();
+        if Some(id) == state.move_touch_id {
+            move_touch = Some(touch.position());
+        }
+        if Some(id) == state.look_touch_id {
+            look_touch = Some(touch.position());
+        }
+    }
+
+    if move_touch.is_none() {
+        state.move_touch_id = None;
+    }
+    if look_touch.is_none() {
+        state.look_touch_id = None;
+    }
+
+    if state.move_touch_id.is_none() {
+        if let Some(touch) = touches.iter().find(|t| t.position().x <= size.x * 0.5) {
+            state.move_touch_id = Some(touch.id());
+            move_touch = Some(touch.position());
+        }
+    }
+    if state.look_touch_id.is_none() {
+        if let Some(touch) = touches.iter().find(|t| t.position().x > size.x * 0.5) {
+            state.look_touch_id = Some(touch.id());
+            look_touch = Some(touch.position());
+        }
+    }
+
+    state.move_axis = move_touch
+        .map(|p| stick_axis_from_touch(p, state.move_center, state.radius, state.dead_zone))
+        .unwrap_or(Vec2::ZERO);
+    state.look_axis = look_touch
+        .map(|p| stick_axis_from_touch(p, state.look_center, state.radius, state.dead_zone))
+        .unwrap_or(Vec2::ZERO);
 }
 
 #[derive(Default, Reflect, Hash, Clone, PartialEq, Eq)]

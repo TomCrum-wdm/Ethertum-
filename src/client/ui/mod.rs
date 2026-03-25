@@ -67,7 +67,7 @@ impl Plugin for UiPlugin {
                     debug::ui_menu_panel.run_if(|cli: Res<ClientInfo>| cli.dbg_menubar),
                     debug::hud_debug_text.run_if(|cli: Res<ClientInfo>| cli.dbg_text).before(debug::ui_menu_panel),
                     /* hud */
-                    (hud::hud_hotbar, hud::hud_chat, hud::hud_playerlist.run_if(condition::manipulating)).run_if(condition::in_world),
+                    (hud::hud_hotbar, hud::hud_chat, hud::hud_playerlist.run_if(condition::manipulating), hud::hud_touch_sticks).run_if(condition::in_world),
                     items::draw_ui_holding_item,
                     /* menu */
                     (
@@ -115,7 +115,7 @@ impl Plugin for UiPlugin {
         {
             app.add_systems(
                 Update,
-                (hud::hud_hotbar, hud::hud_chat, hud::hud_playerlist.run_if(condition::manipulating)).run_if(condition::in_world),
+                (hud::hud_hotbar, hud::hud_chat, hud::hud_playerlist.run_if(condition::manipulating), hud::hud_touch_sticks).run_if(condition::in_world),
             );
             app.insert_resource(hud::ChatHistory::default());
 

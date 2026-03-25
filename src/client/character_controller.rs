@@ -149,6 +149,8 @@ fn input_move(
     mut mouse_motion_events: EventReader<MouseMotion>,
     mut mouse_wheel_events: EventReader<MouseWheel>,
     touches: Res<Touches>,
+    cfg: Res<ClientSettings>,
+    touch_sticks: Res<TouchStickState>,
 
     time: Res<Time>,
     query_input: Query<&ActionState<InputAction>>,
@@ -188,12 +190,14 @@ fn input_move(
                 ctl.yaw -= mouse_delta.x;
             }
 
-            // Touch Look
-            for touch in touches.iter() {
-                let mov = touch.delta();
+            // Touch drag look on non-android platforms, or when Android touch-ui is disabled.
+            if !cfg!(target_os = "android") || !cfg.touch_ui {
+                for touch in touches.iter() {
+                    let mov = touch.delta();
 
-                ctl.pitch -= look_sensitivity * mov.y;
-                ctl.yaw -= look_sensitivity * mov.x;
+                    ctl.pitch -= look_sensitivity * mov.y;
+                    ctl.yaw -= look_sensitivity * mov.x;
+                }
             }
 
             // TouchStickUi / Gamepad: Look
@@ -203,6 +207,11 @@ fn input_move(
                 let look_sensitivity = look_sensitivity * 10.;
                 ctl.pitch += look_sensitivity * axis_value.y;
                 ctl.yaw -= look_sensitivity * axis_value.x;
+
+                if touch_sticks.active {
+                    ctl.pitch += look_sensitivity * touch_sticks.look_axis.y;
+                    ctl.yaw -= look_sensitivity * touch_sticks.look_axis.x;
+                }
             }
 
             let mut is_move_forward = false;
@@ -216,6 +225,14 @@ fn input_move(
                 // info!("moving: {axis_value}");
                 movement.x += axis_value.x;
                 movement.z -= axis_value.y;
+
+                if touch_sticks.active {
+                    if touch_sticks.move_axis.y > 0.0 {
+                        is_move_forward = true;
+                    }
+                    movement.x += touch_sticks.move_axis.x;
+                    movement.z -= touch_sticks.move_axis.y;
+                }
             }
 
             // Clamp/Normalize

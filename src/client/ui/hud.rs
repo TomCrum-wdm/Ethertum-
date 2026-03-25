@@ -314,3 +314,29 @@ pub fn hud_playerlist(
             ui.memory_mut(|m| m.request_focus(Id::NULL));
         });
 }
+
+pub fn hud_touch_sticks(mut ctx: EguiContexts, cfg: Res<ClientSettings>, cli: Res<ClientInfo>, sticks: Res<TouchStickState>) {
+    if !cfg!(target_os = "android") || !cfg.touch_ui || cli.curr_ui != CurrentUI::None || !sticks.active {
+        return;
+    }
+
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    let painter = ctx_mut.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("touch_sticks_overlay")));
+
+    let draw_stick = |center: bevy::math::Vec2, axis: bevy::math::Vec2| {
+        let center_pos = egui::pos2(center.x, center.y);
+        let base_r = sticks.radius;
+        let knob_pos = egui::pos2(center.x + axis.x * base_r, center.y - axis.y * base_r);
+
+        painter.circle_filled(center_pos, base_r, Color32::from_rgba_premultiplied(255, 255, 255, 16));
+        painter.circle_stroke(center_pos, base_r, egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 255, 255, 64)));
+        painter.circle_filled(knob_pos, base_r * 0.38, Color32::from_rgba_premultiplied(255, 255, 255, 56));
+        painter.circle_stroke(knob_pos, base_r * 0.38, egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 255, 255, 140)));
+    };
+
+    draw_stick(sticks.move_center, sticks.move_axis);
+    draw_stick(sticks.look_center, sticks.look_axis);
+}
