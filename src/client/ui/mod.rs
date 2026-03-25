@@ -312,14 +312,16 @@ fn setup_camera_system(
 
     #[cfg(target_os = "android")]
     {
-        // Android-safe path: avoid skybox/env-map and heavy post stack during startup.
-        commands.spawn((
+        // Android path: keep it lightweight but preserve core post effects for correct scene presentation.
+        let mut camera_entity = commands.spawn((
             Camera3d::default(),
             Camera {
                 order: 0,
                 ..default()
             },
+            bevy::render::view::Hdr,
             DistanceFog {
+                color: Color::srgb(0.62, 0.72, 0.84),
                 ..default()
             },
             CharacterControllerCamera,
@@ -327,6 +329,10 @@ fn setup_camera_system(
             DespawnOnWorldUnload,
             Msaa::Off,
         ));
+
+        camera_entity
+            .insert(Tonemapping::TonyMcMapface)
+            .insert(Bloom::default());
     }
 }
 
@@ -428,6 +434,13 @@ fn ui_example_system(
 }
 
 fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+        if sfx_state.back_requested {
+            sfx_state.back_requested = false;
+            cli.curr_ui = CurrentUI::MainMenu;
+        }
+    }
+
     #[cfg(target_os = "android")]
     {
         return;
@@ -468,10 +481,6 @@ fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played
         }
         sfx_state.clicked = false;
 
-        if sfx_state.back_requested {
-            sfx_state.back_requested = false;
-            cli.curr_ui = CurrentUI::MainMenu;
-        }
     }
 }
 

@@ -82,7 +82,6 @@ fn update_touch_sticks(
 ) {
     let Ok(window) = query_window.single() else {
         state.move_axis = Vec2::ZERO;
-        state.look_axis = Vec2::ZERO;
         state.active = false;
         return;
     };
@@ -91,9 +90,7 @@ fn update_touch_sticks(
     state.active = enabled;
     if !enabled {
         state.move_axis = Vec2::ZERO;
-        state.look_axis = Vec2::ZERO;
         state.move_touch_id = None;
-        state.look_touch_id = None;
         return;
     }
 

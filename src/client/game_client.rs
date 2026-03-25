@@ -104,7 +104,13 @@ fn apply_graphics_settings(
     cfg: Res<ClientSettings>,
     mut ambient: ResMut<AmbientLight>,
 ) {
-    ambient.brightness = if cfg.high_quality_rendering { 1.25 } else { 0.8 };
+    ambient.brightness = if cfg!(target_os = "android") {
+        if cfg.high_quality_rendering { 1.8 } else { 1.3 }
+    } else if cfg.high_quality_rendering {
+        1.25
+    } else {
+        0.8
+    };
 }
 
 #[cfg(target_os = "android")]
@@ -253,7 +259,7 @@ impl Default for ClientInfo {
             sky_inscattering_color: Color::srgb(110.0 / 255.0, 230.0 / 255.0, 1.0), // bevy demo: Color::rgb(0.7, 0.844, 1.0),
             sky_extinction_color: Color::srgb(0.35, 0.5, 0.66),
 
-            skylight_shadow: true,
+            skylight_shadow: !cfg!(target_os = "android"),
             skylight_illuminance: 20.,
 
             enable_cursor_look: true,
