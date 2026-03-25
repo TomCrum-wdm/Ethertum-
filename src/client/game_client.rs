@@ -10,7 +10,6 @@ use bevy_atmosphere::prelude::*;
 use crate::client::prelude::*;
 use crate::item::ItemPlugin;
 use crate::net::{CPacket, ClientNetworkPlugin, RenetClientHelper};
-#[cfg(not(target_os = "android"))]
 use crate::server::prelude::IntegratedServerPlugin;
 use crate::ui::prelude::*;
 use crate::voxel::ClientVoxelPlugin;
