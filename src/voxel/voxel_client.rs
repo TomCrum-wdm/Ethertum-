@@ -823,6 +823,8 @@ fn asset_load_ui_system(
     // no-op placeholder when UI is not available
     let _ = (asset_server, assets, texts);
 
+}
+
 
 fn write_debug_file_system(
     asset_server: Res<AssetServer>,
