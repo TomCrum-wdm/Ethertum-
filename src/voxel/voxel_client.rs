@@ -21,11 +21,9 @@ struct AssetDebug {
     dram: Handle<Image>,
     foliage_diff: Handle<Image>,
     water_normals: Handle<Image>,
-    text_entity: Entity,
 }
 
-#[derive(Component)]
-struct DumpDebugButton;
+// UI button removed to avoid requiring bevy UI on all targets
 
 pub struct ClientVoxelPlugin;
 
@@ -45,7 +43,8 @@ impl Plugin for ClientVoxelPlugin {
         }
 
         app.add_systems(First, on_world_init.run_if(condition::load_world));
-        app.add_systems(Update, (asset_load_ui_system, debug_button_system).run_if(condition::in_world));
+        // Register periodic file-export debug writer (portable across targets)
+        app.add_systems(Update, write_debug_file_system.run_if(condition::in_world));
         app.add_systems(Last, on_world_exit.run_if(condition::unload_world()));
 
         app.insert_resource(VoxelBrush::default());
@@ -176,68 +175,16 @@ fn on_world_init(
         },
     });
 
-    // Spawn simple UI text to show asset load status on device (visible even without logcat)
-    let font_handle: Handle<Font> = asset_server.load("fonts/FiraSans-Bold.ttf");
-    let text_ent = cmds
-        .spawn(TextBundle {
-            text: Text::from_section(
-                "Assets: checking...",
-                TextStyle {
-                    font: font_handle.clone(),
-                    font_size: 18.0,
-                    color: Color::WHITE,
-                },
-            ),
-            style: Style {
-                position_type: PositionType::Absolute,
-                position: UiRect {
-                    left: Val::Px(8.0),
-                    top: Val::Px(8.0),
-                    ..default()
-                },
-                ..default()
-            },
-            ..default()
-        })
-        .id();
-
-    // store debug handles
+    // store debug handles (no UI; write debug file to disk)
     cmds.insert_resource(AssetDebug {
         albedo: albedo_h,
         normal: normal_h,
         dram: dram_h,
         foliage_diff: foliage_h,
         water_normals: water_norm_h,
-        text_entity: text_ent,
     });
 
-    // Spawn a small Dump Debug button (top-right)
-    cmds.spawn((
-        ButtonBundle {
-            style: Style {
-                position_type: PositionType::Absolute,
-                position: UiRect {
-                    right: Val::Px(8.0),
-                    top: Val::Px(8.0),
-                    ..default()
-                },
-                padding: UiRect::all(Val::Px(6.0)),
-                ..default()
-            },
-            background_color: BackgroundColor(Color::rgb(0.2, 0.2, 0.2)),
-            ..default()
-        },
-        DumpDebugButton,
-    )).with_children(|parent| {
-        parent.spawn(TextBundle::from_section(
-            "Dump Debug",
-            TextStyle {
-                font: font_handle.clone(),
-                font_size: 16.0,
-                color: Color::WHITE,
-            },
-        ));
-    });
+    // UI button removed; debug export will be file-based and periodic so it is portable
 
     // ChunkSystem entity. all chunk entities will be spawn as children. (for almost no reason. just for editor hierarchy)
     chunk_sys.entity = cmds
@@ -878,100 +825,5 @@ fn asset_load_ui_system(
         None => return,
     };
 
-    let mut states = vec![];
+        // asset_load_ui_system kept as a no-op placeholder when UI is not available
     for (name, handle) in [
-        ("albedo", assets.albedo.clone().typed::<Image>()),
-        ("normal", assets.normal.clone().typed::<Image>()),
-        ("dram", assets.dram.clone().typed::<Image>()),
-        ("foliage", assets.foliage_diff.clone().typed::<Image>()),
-        ("water_norm", assets.water_normals.clone().typed::<Image>()),
-    ] {
-        let ls = asset_server.get_load_state(handle.id());
-        states.push((name, ls));
-    }
-
-    if let Ok(mut text) = texts.get_mut(assets.text_entity) {
-        let mut s = String::from("Assets:\n");
-        for (name, st) in states {
-            s.push_str(&format!("{}: {:?}\n", name, st));
-        }
-        text.sections[0].value = s;
-    }
-}
-
-fn debug_button_system(
-    mut interaction_query: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<DumpDebugButton>)>,
-    asset_server: Res<AssetServer>,
-    asset_debug: Option<Res<AssetDebug>>,
-    chunk_sys: Option<Res<ClientChunkSystem>>,
-    meshes: Option<Res<Assets<Mesh>>>,
-    mtls_terrain: Option<Res<Assets<ExtendedMaterial<StandardMaterial, TerrainMaterial>>>>,
-    mut texts: Query<&mut Text>,
-) {
-    if asset_debug.is_none() {
-        return;
-    }
-    let asset_debug = asset_debug.unwrap();
-
-    for (interaction, mut bg) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg = BackgroundColor(Color::rgb(0.1, 0.6, 0.1));
-
-                // Build debug string
-                let mut s = String::new();
-                s.push_str(&format!("Timestamp: {:?}\n", std::time::SystemTime::now()));
-
-                // Asset states
-                let assets = [
-                    ("albedo", asset_debug.albedo.clone().typed::<Image>()),
-                    ("normal", asset_debug.normal.clone().typed::<Image>()),
-                    ("dram", asset_debug.dram.clone().typed::<Image>()),
-                    ("foliage", asset_debug.foliage_diff.clone().typed::<Image>()),
-                    ("water_norm", asset_debug.water_normals.clone().typed::<Image>()),
-                ];
-                s.push_str("Asset States:\n");
-                for (name, handle) in assets.iter() {
-                    let st = asset_server.get_load_state(handle.id());
-                    s.push_str(&format!("  {}: {:?}\n", name, st));
-                }
-
-                if let Some(chunks) = chunk_sys {
-                    s.push_str(&format!("Chunks Loaded: {}\n", chunks.chunks.len()));
-                }
-
-                if let Some(ms) = meshes {
-                    s.push_str(&format!("Meshes: {}\n", ms.len()));
-                }
-
-                if let Some(mt) = mtls_terrain {
-                    s.push_str(&format!("Terrain Materials: {}\n", mt.len()));
-                }
-
-                // Write to file in current dir
-                let path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                    .join("eth_debug.txt");
-                match std::fs::write(&path, s.as_bytes()) {
-                    Ok(_) => {
-                        info!("Wrote debug file: {:?}", path);
-                        if let Ok(mut text) = texts.get_mut(asset_debug.text_entity) {
-                            text.sections[0].value = format!("Dumped debug: {:?}", path.display());
-                        }
-                    }
-                    Err(e) => {
-                        error!("Failed to write debug file: {}", e);
-                        if let Ok(mut text) = texts.get_mut(asset_debug.text_entity) {
-                            text.sections[0].value = format!("Dump failed: {}", e);
-                        }
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                *bg = BackgroundColor(Color::rgb(0.15, 0.65, 0.15));
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(Color::rgb(0.2, 0.2, 0.2));
-            }
-        }
-    }
-}
