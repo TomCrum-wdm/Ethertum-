@@ -73,13 +73,49 @@ fn on_world_init(
 
     chunk_sys.mtl_terrain = mtls_terrain.add(ExtendedMaterial {
         base: StandardMaterial {
-            base_color_texture: Some(asset_server.load("baked/atlas_diff.png")),
-            normal_map_texture: Some(asset_server.load("baked/atlas_norm.png")),
+            base_color_texture: Some(asset_server.load_with_settings::<Image, ImageLoaderSettings>(
+                "baked/atlas_diff.png",
+                |settings| {
+                    settings.is_srgb = true; // color/albedo must be sRGB
+                    settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                        address_mode_u: ImageAddressMode::Repeat,
+                        address_mode_v: ImageAddressMode::Repeat,
+                        mag_filter: ImageFilterMode::Linear,
+                        min_filter: ImageFilterMode::Linear,
+                        ..default()
+                    });
+                },
+            )),
+            normal_map_texture: Some(asset_server.load_with_settings::<Image, ImageLoaderSettings>(
+                "baked/atlas_norm.png",
+                |settings| {
+                    settings.is_srgb = false; // normal maps must be linear
+                    settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                        address_mode_u: ImageAddressMode::Repeat,
+                        address_mode_v: ImageAddressMode::Repeat,
+                        mag_filter: ImageFilterMode::Linear,
+                        min_filter: ImageFilterMode::Linear,
+                        ..default()
+                    });
+                },
+            )),
             alpha_mode: AlphaMode::Opaque,
             ..default()
         },
         extension: TerrainMaterial {
-            dram_texture: Some(asset_server.load("baked/atlas_dram.png")),
+            dram_texture: Some(asset_server.load_with_settings::<Image, ImageLoaderSettings>(
+                "baked/atlas_dram.png",
+                |settings| {
+                    settings.is_srgb = true;
+                    settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                        address_mode_u: ImageAddressMode::Repeat,
+                        address_mode_v: ImageAddressMode::Repeat,
+                        mag_filter: ImageFilterMode::Linear,
+                        min_filter: ImageFilterMode::Linear,
+                        ..default()
+                    });
+                },
+            )),
             ..default()
         }
     });
