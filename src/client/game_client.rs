@@ -41,7 +41,7 @@ impl Plugin for ClientGamePlugin {
         {
             app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::forward());
             app.insert_resource(AmbientLight { brightness: 1.8, ..default() });
-            app.insert_resource(ClearColor(Color::rgb(0.06, 0.09, 0.12)));
+            app.insert_resource(ClearColor(Color::srgb(0.06, 0.09, 0.12)));
         }
             
             // SSAO

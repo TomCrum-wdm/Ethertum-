@@ -1,2 +1,5 @@
 [target.wasm32-unknown-unknown]
 runner = "wasm-server-runner"
+
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android24-clang.cmd"

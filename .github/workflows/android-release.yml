@@ -1,0 +1,106 @@
+name: Android Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Setup Android SDK and Build-tools
+        uses: android-actions/setup-sdk@v2
+        with:
+          api-level: 33
+          build-tools: '33.0.2'
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-ndk@v2
+        with:
+          ndk-version: '27.2.12479018'
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Setup Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: rust-src
+
+      - name: Add Android targets
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk --locked
+
+      - name: Build aarch64 release APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          cargo apk build --profile android-release --target aarch64-linux-android --package mobile
+
+      - name: Build x86_64 release APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          cargo apk build --profile android-release --target x86_64-linux-android --package mobile
+
+      - name: Decode keystore (if provided)
+        if: ${{ secrets.ANDROID_KEYSTORE != '' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 --decode > release.keystore
+
+      - name: Align and sign APK (if keystore provided)
+        if: ${{ secrets.ANDROID_KEYSTORE != '' }}
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+        run: |
+          set -e
+          APK=$(find target -type f -name "*.apk" | head -n1)
+          echo "Found APK: $APK"
+          ZIPALIGN=$(which zipalign || true)
+          APKSIGNER=$(which apksigner || true)
+          if [ -z "$ZIPALIGN" ] || [ -z "$APKSIGNER" ]; then
+            echo "zipalign/apksigner not found in PATH"
+            ls -la $ANDROID_SDK_ROOT
+            exit 1
+          fi
+          aligned=aligned.apk
+          signed=signed.apk
+          $ZIPALIGN -v -p 4 "$APK" $aligned
+          $APKSIGNER sign --ks release.keystore --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} --ks-key-alias ${{ secrets.ANDROID_KEY_ALIAS }} --out $signed $aligned || true
+          mkdir -p release
+          mv $signed release/ || true
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ethertia-apks
+          path: |
+            release/*.apk
+            target/**/**/*.apk
