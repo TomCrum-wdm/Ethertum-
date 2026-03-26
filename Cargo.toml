@@ -111,3 +111,7 @@ opt-level = "z"  # default=39.2mb, "z"=17.3mb,
 [profile.android-debug]
 inherits = "dev"
 opt-level = 1
+
+[profile.android-release]
+inherits = "release"
+opt-level = 3
