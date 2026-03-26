@@ -820,10 +820,62 @@ fn asset_load_ui_system(
     assets: Option<Res<AssetDebug>>,
     mut texts: Query<&mut Text>,
 ) {
-    let assets = match assets {
+    // no-op placeholder when UI is not available
+    let _ = (asset_server, assets, texts);
+
+
+fn write_debug_file_system(
+    asset_server: Res<AssetServer>,
+    asset_debug: Option<Res<AssetDebug>>,
+    chunk_sys: Option<Res<ClientChunkSystem>>,
+    meshes: Option<Res<Assets<Mesh>>>,
+    mtls_terrain: Option<Res<Assets<ExtendedMaterial<StandardMaterial, TerrainMaterial>>>>,
+    time: Res<Time>,
+    mut last: Local<f32>,
+) {
+    let assets = match asset_debug {
         Some(a) => a,
         None => return,
     };
 
-        // asset_load_ui_system kept as a no-op placeholder when UI is not available
-    for (name, handle) in [
+    // write at most once every 2 seconds
+    *last += time.delta_seconds();
+    if *last < 2.0 {
+        return;
+    }
+    *last = 0.0;
+
+    let mut s = String::new();
+    s.push_str(&format!("Timestamp: {:?}\n", std::time::SystemTime::now()));
+
+    let items = [
+        ("albedo", assets.albedo.clone().typed::<Image>()),
+        ("normal", assets.normal.clone().typed::<Image>()),
+        ("dram", assets.dram.clone().typed::<Image>()),
+        ("foliage", assets.foliage_diff.clone().typed::<Image>()),
+        ("water_norm", assets.water_normals.clone().typed::<Image>()),
+    ];
+    s.push_str("Asset States:\n");
+    for (name, handle) in items.iter() {
+        let st = asset_server.get_load_state(handle.id());
+        s.push_str(&format!("  {}: {:?}\n", name, st));
+    }
+
+    if let Some(chunks) = chunk_sys {
+        s.push_str(&format!("Chunks Loaded: {}\n", chunks.chunks.len()));
+    }
+    if let Some(ms) = meshes {
+        s.push_str(&format!("Meshes: {}\n", ms.len()));
+    }
+    if let Some(mt) = mtls_terrain {
+        s.push_str(&format!("Terrain Materials: {}\n", mt.len()));
+    }
+
+    let path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("eth_debug.txt");
+    if let Err(e) = std::fs::write(&path, s.as_bytes()) {
+        error!("Failed to write debug file: {}", e);
+    } else {
+        info!("Wrote debug file: {:?}", path);
+    }
+}
