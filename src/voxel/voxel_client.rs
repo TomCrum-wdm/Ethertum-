@@ -841,7 +841,7 @@ fn write_debug_file_system(
     };
 
     // write at most once every 2 seconds
-    *last += time.delta_seconds();
+    *last += time.delta_secs();
     if *last < 2.0 {
         return;
     }
@@ -850,16 +850,16 @@ fn write_debug_file_system(
     let mut s = String::new();
     s.push_str(&format!("Timestamp: {:?}\n", std::time::SystemTime::now()));
 
-    let items = [
-        ("albedo", assets.albedo.clone().typed::<Image>()),
-        ("normal", assets.normal.clone().typed::<Image>()),
-        ("dram", assets.dram.clone().typed::<Image>()),
-        ("foliage", assets.foliage_diff.clone().typed::<Image>()),
-        ("water_norm", assets.water_normals.clone().typed::<Image>()),
+    let items = vec![
+        ("albedo", assets.albedo.id()),
+        ("normal", assets.normal.id()),
+        ("dram", assets.dram.id()),
+        ("foliage", assets.foliage_diff.id()),
+        ("water_norm", assets.water_normals.id()),
     ];
     s.push_str("Asset States:\n");
-    for (name, handle) in items.iter() {
-        let st = asset_server.get_load_state(handle.id());
+    for (name, handle_id) in items.iter() {
+        let st = asset_server.get_load_state(*handle_id);
         s.push_str(&format!("  {}: {:?}\n", name, st));
     }
 
