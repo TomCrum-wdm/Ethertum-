@@ -8,7 +8,9 @@ use super::*;
 use crate::util::{hash, iter};
 use crate::client::settings::{ClientSettings, TerrainMode};
 
-pub fn generate_chunk(chunk: &mut Chunk) {
+// use crate::client::settings::ClientSettings;
+
+pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
     let seed = 100;
     // let perlin = Perlin::new(seed);
     let mut fbm = Fbm::<Perlin>::new(seed);
@@ -17,14 +19,13 @@ pub fn generate_chunk(chunk: &mut Chunk) {
     fbm.octaves = 5;
     // fbm.persistence = 2;
 
-    // 获取地形模式（默认球体）
-    let terrain_mode = bevy::ecs::world::World::get_resource::<ClientSettings>(unsafe { &*(&chunk as *const _ as *const bevy::ecs::world::World) })
-        .map(|cfg| cfg.terrain_mode)
-        .unwrap_or(TerrainMode::Planet);
+    // 直接安全获取地形模式
+    let terrain_mode = settings.terrain_mode;
 
-    let planet_center = IVec3::new(0, 0, 0);
+    // 将球心提升到y=512，壳厚度加大，地形更厚实
+    let planet_center = IVec3::new(0, 512, 0);
     let planet_radius: f32 = 512.0;
-    let shell_thickness: f32 = 24.0;
+    let shell_thickness: f32 = 96.0;
 
     for ly in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
@@ -39,7 +40,8 @@ pub fn generate_chunk(chunk: &mut Chunk) {
                         let arr3 = (p.as_vec3() / 90.0).to_array().map(|v| v as f64);
                         let f_terr = fbm.get(arr2) as f32;
                         let f_3d = fbm.get(arr3) as f32;
-                        let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 4.5;
+                        // 减小3D噪声影响，壳层更厚
+                        let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 1.2;
                         let mut tex = VoxTex::Nil;
                         if val > 0.0 {
                             tex = VoxTex::Stone;

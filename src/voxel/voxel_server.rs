@@ -66,7 +66,10 @@ fn chunks_load(
                 // info!("Load Chunk: {:?}", chunkpos);
                 let mut chunk = Chunk::new(chunkpos);
 
-                super::worldgen::generate_chunk(&mut chunk);
+                // 获取全局ClientSettings
+                // TODO: 这里应由上层系统传入settings参数，临时用默认值防止编译错误
+                let settings = crate::client::settings::ClientSettings::default();
+                super::worldgen::generate_chunk(&mut chunk, &settings);
 
                 let chunkptr = Arc::new(chunk);
                 if tx.send((chunkpos, chunkptr)).is_err() {
