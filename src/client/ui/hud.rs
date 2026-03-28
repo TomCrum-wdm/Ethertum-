@@ -343,6 +343,8 @@ pub fn hud_touch_sticks(
         buttons.jump_just_pressed = false;
         buttons.sprint_pressed = false;
         buttons.sprint_just_pressed = false;
+        buttons.crouch_pressed = false;
+        buttons.crouch_just_pressed = false;
         return;
     }
 
@@ -402,6 +404,7 @@ pub fn hud_touch_sticks(
     buttons.use_pressed = false;
     buttons.jump_pressed = false;
     buttons.sprint_pressed = false;
+    buttons.crouch_pressed = false;
 
     let painter = ctx_mut.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("touch_controls_overlay")));
 
@@ -428,6 +431,17 @@ pub fn hud_touch_sticks(
         painter.circle_filled(egui::pos2(knob_pos.x, knob_pos.y), stick_radius * 0.40, Color32::from_rgba_premultiplied(130, 220, 255, 190));
     }
 
+    if sticks.sprint_locked {
+        let lock_pos = egui::pos2(stick_center.x, stick_center.y - stick_radius - 18.0);
+        painter.text(
+            lock_pos,
+            egui::Align2::CENTER_CENTER,
+            "RUN LOCK",
+            egui::FontId::proportional(13.0),
+            Color32::from_rgb(255, 220, 130),
+        );
+    }
+
     if cli.touch_controls_edit_mode {
         egui::Area::new(Id::new("touch_move_stick_drag"))
             .fixed_pos(egui::pos2(stick_center.x - stick_radius, stick_center.y - stick_radius))
@@ -447,8 +461,18 @@ pub fn hud_touch_sticks(
     }
 
     let button_radius = touch_cfg.button_radius.clamp(30.0, 80.0);
-    let mut draw_button = |id: &str, label: &str, pos_uv: &mut [f32; 2], binding: TouchActionBinding| {
+    let action_visual = |binding: TouchActionBinding| -> (&'static str, Color32) {
+        match binding {
+            TouchActionBinding::Attack => ("PICK", Color32::from_rgb(255, 140, 120)),
+            TouchActionBinding::UseItem => ("BLOCK", Color32::from_rgb(110, 220, 160)),
+            TouchActionBinding::Jump => ("UP", Color32::from_rgb(130, 200, 255)),
+            TouchActionBinding::Sprint => ("RUN", Color32::from_rgb(255, 210, 120)),
+            TouchActionBinding::Sneak => ("CROUCH", Color32::from_rgb(190, 180, 255)),
+        }
+    };
+    let mut draw_button = |id: &str, pos_uv: &mut [f32; 2], binding: TouchActionBinding| {
         let pos = to_pos(*pos_uv);
+        let (label, tint) = action_visual(binding);
 
         egui::Area::new(Id::new(format!("touch_btn_{id}")))
             .fixed_pos(egui::pos2(pos.x - button_radius, pos.y - button_radius))
@@ -473,14 +497,14 @@ pub fn hud_touch_sticks(
                 }
 
                 let fill = if pressed {
-                    Color32::from_rgba_premultiplied(255, 255, 255, 64)
+                    Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 110)
                 } else {
-                    Color32::from_rgba_premultiplied(255, 255, 255, 28)
+                    Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 42)
                 };
                 let stroke = if cli.touch_controls_edit_mode {
                     egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 220, 120, 220))
                 } else {
-                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 255, 255, 140))
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 200))
                 };
 
                 ui.painter().circle_filled(p, button_radius, fill);
@@ -493,15 +517,17 @@ pub fn hud_touch_sticks(
                         TouchActionBinding::UseItem => buttons.use_pressed = true,
                         TouchActionBinding::Jump => buttons.jump_pressed = true,
                         TouchActionBinding::Sprint => buttons.sprint_pressed = true,
+                        TouchActionBinding::Sneak => buttons.crouch_pressed = true,
                     }
                 }
             });
     };
 
-    draw_button("attack", "ATK", &mut touch_cfg.attack_button_pos, touch_cfg.attack_button_action);
-    draw_button("use", "USE", &mut touch_cfg.use_button_pos, touch_cfg.use_button_action);
-    draw_button("jump", "JMP", &mut touch_cfg.jump_button_pos, touch_cfg.jump_button_action);
-    draw_button("sprint", "SPR", &mut touch_cfg.sprint_button_pos, touch_cfg.sprint_button_action);
+    draw_button("attack", &mut touch_cfg.attack_button_pos, touch_cfg.attack_button_action);
+    draw_button("use", &mut touch_cfg.use_button_pos, touch_cfg.use_button_action);
+    draw_button("jump", &mut touch_cfg.jump_button_pos, touch_cfg.jump_button_action);
+    draw_button("sprint", &mut touch_cfg.sprint_button_pos, touch_cfg.sprint_button_action);
+    draw_button("crouch", &mut touch_cfg.crouch_button_pos, touch_cfg.crouch_button_action);
 
     if show_for_edit {
         let pointer_down = ctx_mut.input(|i| i.pointer.primary_down());
@@ -537,5 +563,6 @@ pub fn hud_touch_sticks(
     buttons.use_just_pressed = buttons.use_pressed && !prev.use_pressed;
     buttons.jump_just_pressed = buttons.jump_pressed && !prev.jump_pressed;
     buttons.sprint_just_pressed = buttons.sprint_pressed && !prev.sprint_pressed;
+    buttons.crouch_just_pressed = buttons.crouch_pressed && !prev.crouch_pressed;
 }
 

@@ -18,6 +18,11 @@ pub struct CellData {
 pub struct NetItemStack {
     pub count: u8,
     pub item_id: u8,
+    // 可选：同步物理属性（兼容旧协议，暂不强制使用）
+    // pub mass: Option<f32>,
+    // pub volume: Option<f32>,
+    // pub density: Option<f32>,
+    // pub molar_mass: Option<f32>,
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]

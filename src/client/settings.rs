@@ -1,3 +1,9 @@
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TerrainMode {
+    Planet,
+    Flat,
+}
+
 // ClientSettings Configs
 
 use crate::prelude::*;
@@ -67,6 +73,7 @@ pub enum TouchActionBinding {
     UseItem,
     Jump,
     Sprint,
+    Sneak,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -80,12 +87,14 @@ pub struct TouchControlsConfig {
     pub use_button_pos: [f32; 2],
     pub jump_button_pos: [f32; 2],
     pub sprint_button_pos: [f32; 2],
+    pub crouch_button_pos: [f32; 2],
     pub button_radius: f32,
 
     pub attack_button_action: TouchActionBinding,
     pub use_button_action: TouchActionBinding,
     pub jump_button_action: TouchActionBinding,
     pub sprint_button_action: TouchActionBinding,
+    pub crouch_button_action: TouchActionBinding,
 }
 
 impl Default for TouchControlsConfig {
@@ -93,18 +102,20 @@ impl Default for TouchControlsConfig {
         Self {
             move_stick_pos: [0.18, 0.80],
             move_stick_radius: 120.0,
-            move_dead_zone: 0.10,
+            move_dead_zone: 0.06,
 
             attack_button_pos: [0.84, 0.78],
             use_button_pos: [0.72, 0.84],
             jump_button_pos: [0.90, 0.66],
             sprint_button_pos: [0.64, 0.68],
+            crouch_button_pos: [0.76, 0.66],
             button_radius: 44.0,
 
             attack_button_action: TouchActionBinding::Attack,
             use_button_action: TouchActionBinding::UseItem,
             jump_button_action: TouchActionBinding::Jump,
             sprint_button_action: TouchActionBinding::Sprint,
+            crouch_button_action: TouchActionBinding::Sneak,
         }
     }
 }
@@ -227,6 +238,8 @@ pub struct ClientSettings {
     #[serde(default)]
     #[reflect(ignore)]
     pub controls: ControlsConfig,
+
+    pub terrain_mode: TerrainMode, // 新增：地形模式
 }
 
 impl Default for ClientSettings {
@@ -241,8 +254,8 @@ impl Default for ClientSettings {
             touch_ui: true,
 
             chunks_load_distance: IVec2::new(4, 3),
-            
             controls: ControlsConfig::default(),
+            terrain_mode: TerrainMode::Planet, // 默认球体
         }
     }
 }

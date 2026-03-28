@@ -3,8 +3,10 @@ use std::ops::Div;
 use bevy::{math::ivec3, prelude::*};
 use noise::{Fbm, NoiseFn, Perlin};
 
+
 use super::*;
 use crate::util::{hash, iter};
+use crate::client::settings::{ClientSettings, TerrainMode};
 
 pub fn generate_chunk(chunk: &mut Chunk) {
     let seed = 100;
@@ -15,26 +17,50 @@ pub fn generate_chunk(chunk: &mut Chunk) {
     fbm.octaves = 5;
     // fbm.persistence = 2;
 
+    // 获取地形模式（默认球体）
+    let terrain_mode = bevy::ecs::world::World::get_resource::<ClientSettings>(unsafe { &*(&chunk as *const _ as *const bevy::ecs::world::World) })
+        .map(|cfg| cfg.terrain_mode)
+        .unwrap_or(TerrainMode::Planet);
+
+    let planet_center = IVec3::new(0, 0, 0);
+    let planet_radius: f32 = 512.0;
+    let shell_thickness: f32 = 24.0;
+
     for ly in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
             for lx in 0..Chunk::LEN {
                 let lp = IVec3::new(lx, ly, lz);
                 let p = chunk.chunkpos + lp;
 
-                let f_terr = fbm.get(p.xz().as_dvec2().div(130.).to_array()) as f32;
-                let f_3d = fbm.get(p.as_dvec3().div(90.).to_array()) as f32;
-
-                let mut val = f_terr - (p.y as f32) / 18. + f_3d * 4.5;
-                // val = (-p.y as f32 - 1.) / 18.;  // super flat
-
-                let mut tex = VoxTex::Nil; //(p.x / 2 % 24).abs() as u16;
-                if val > 0.0 {
-                    tex = VoxTex::Stone;
-                }
-                else if p.y < 0 && val < 0. {
-                    val = -0.1;
-                    tex = VoxTex::Water;
-                }
+                let (val, mut tex) = match terrain_mode {
+                    TerrainMode::Planet => {
+                        let d = (p.as_vec3() - planet_center.as_vec3()).length();
+                        let f_terr = fbm.get((p.as_vec3() / 130.0).xz().to_array()) as f32;
+                        let f_3d = fbm.get((p.as_vec3() / 90.0).to_array()) as f32;
+                        let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 4.5;
+                        let mut tex = VoxTex::Nil;
+                        if val > 0.0 {
+                            tex = VoxTex::Stone;
+                        } else if d < planet_radius && val < 0.0 {
+                            val = -0.1;
+                            tex = VoxTex::Water;
+                        }
+                        (val, tex)
+                    }
+                    TerrainMode::Flat => {
+                        let f_terr = fbm.get(p.xz().as_dvec2().div(130.).to_array()) as f32;
+                        let f_3d = fbm.get(p.as_dvec3().div(90.).to_array()) as f32;
+                        let mut val = f_terr - (p.y as f32) / 18. + f_3d * 4.5;
+                        let mut tex = VoxTex::Nil;
+                        if val > 0.0 {
+                            tex = VoxTex::Stone;
+                        } else if p.y < 0 && val < 0. {
+                            val = -0.1;
+                            tex = VoxTex::Water;
+                        }
+                        (val, tex)
+                    }
+                };
                 *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
             }
         }

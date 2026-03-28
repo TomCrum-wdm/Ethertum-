@@ -128,6 +128,19 @@ pub fn ui_settings(
                         ui_setting_line(ui, "Chunk Load Distance X", egui::Slider::new(&mut cfg.chunks_load_distance.x, -1..=25));
                         ui_setting_line(ui, "Chunk Load Distance Y", egui::Slider::new(&mut cfg.chunks_load_distance.y, -1..=25));
 
+                        ui.label("地形模式:");
+                        ui.horizontal(|ui| {
+                            let mode = &mut cfg.terrain_mode;
+                            let planet = *mode == crate::client::settings::TerrainMode::Planet;
+                            let flat = *mode == crate::client::settings::TerrainMode::Flat;
+                            if ui.radio(planet, "星球（球体）").clicked() {
+                                *mode = crate::client::settings::TerrainMode::Planet;
+                            }
+                            if ui.radio(flat, "平面").clicked() {
+                                *mode = crate::client::settings::TerrainMode::Flat;
+                            }
+                        });
+                        ui.separator();
                         ui.label("Voxel Brush:");
 
                         ui_setting_line(ui, "Size", egui::Slider::new(&mut vox_brush.size, 0.0..=20.0));
@@ -138,15 +151,22 @@ pub fn ui_settings(
 
                         ui_setting_line(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25));
 
+                        // 新增：示例显示第一个物品的物理属性（后续可完善为热栏/背包界面显示）
+                        if let Some(items) = ctx.world().get_resource::<crate::item::Items>() {
+                            if let Some(def) = items.defs.get(0) {
+                                ui.separator();
+                                ui.label(format!("物品: {}", def.name));
+                                ui.label(format!("质量: {:.3} kg", def.props.mass));
+                                ui.label(format!("体积: {:.5} m³", def.props.volume));
+                                ui.label(format!("密度: {:.1} kg/m³", def.props.density));
+                                ui.label(format!("摩尔质量: {:.2} g/mol", def.props.molar_mass));
+                            }
+                        }
 
                         if let Some(worldinfo) = &mut worldinfo {
-                            
                             ui.label("World:");
-                            
                             ui_setting_line(ui, "Day Time", egui::Slider::new(&mut worldinfo.daytime, 0.0..=1.0));
-
                             ui_setting_line(ui, "Day Time Length", egui::Slider::new(&mut worldinfo.daytime_length, 0.0..=60.0 * 24.0));
-
                         }
                         
                         ui.label("Video:");
@@ -256,6 +276,10 @@ pub fn ui_settings(
                             "Move Dead Zone",
                             egui::Slider::new(&mut cfg.controls.touch.move_dead_zone, 0.0..=0.5),
                         );
+                        ui.colored_label(
+                            Color32::from_gray(180),
+                            "Tip: push the move stick to the top edge to lock sprint; pull down to release.",
+                        );
                         ui_setting_line(
                             ui,
                             "Button Radius",
@@ -271,6 +295,7 @@ pub fn ui_settings(
                                 ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::UseItem, "UseItem");
                                 ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Jump, "Jump");
                                 ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sprint, "Sprint");
+                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sneak, "Sneak");
                             });
                         egui::ComboBox::from_label("Use Button Action")
                             .selected_text(format!("{:?}", cfg.controls.touch.use_button_action))
@@ -279,6 +304,7 @@ pub fn ui_settings(
                                 ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::UseItem, "UseItem");
                                 ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Jump, "Jump");
                                 ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sprint, "Sprint");
+                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sneak, "Sneak");
                             });
                         egui::ComboBox::from_label("Jump Button Action")
                             .selected_text(format!("{:?}", cfg.controls.touch.jump_button_action))
@@ -287,6 +313,7 @@ pub fn ui_settings(
                                 ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::UseItem, "UseItem");
                                 ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Jump, "Jump");
                                 ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sprint, "Sprint");
+                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sneak, "Sneak");
                             });
                         egui::ComboBox::from_label("Sprint Button Action")
                             .selected_text(format!("{:?}", cfg.controls.touch.sprint_button_action))
@@ -295,6 +322,16 @@ pub fn ui_settings(
                                 ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::UseItem, "UseItem");
                                 ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Jump, "Jump");
                                 ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sprint, "Sprint");
+                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sneak, "Sneak");
+                            });
+                        egui::ComboBox::from_label("Crouch Button Action")
+                            .selected_text(format!("{:?}", cfg.controls.touch.crouch_button_action))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Attack, "Attack");
+                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::UseItem, "UseItem");
+                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Jump, "Jump");
+                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sprint, "Sprint");
+                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sneak, "Sneak");
                             });
 
                         if ui.button("Reset Touch Layout").clicked() {

@@ -196,7 +196,8 @@ fn input_move(
                 let block_touch_look = touch_buttons.attack_pressed
                     || touch_buttons.use_pressed
                     || touch_buttons.jump_pressed
-                    || touch_buttons.sprint_pressed;
+                    || touch_buttons.sprint_pressed
+                    || touch_buttons.crouch_pressed;
                 if !block_touch_look {
                 for touch in touches.iter() {
                     if touch_sticks.move_touch_id == Some(touch.id()) {
@@ -292,7 +293,8 @@ fn input_move(
             //     movement.z += 1.;
             // }
 
-            ctl.is_sneaking = action_state.pressed(&InputAction::Sneak);
+            let touch_sneak_pressed = cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.crouch_pressed;
+            ctl.is_sneaking = action_state.pressed(&InputAction::Sneak) || touch_sneak_pressed;
 
             let touch_jump_pressed = cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.jump_pressed;
             let touch_jump_just_pressed = cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.jump_just_pressed;
@@ -337,7 +339,9 @@ fn input_move(
             // Input Sprint
             if is_move_forward {
                 let sprint_pressed = action_state.pressed(&InputAction::Sprint)
-                    || (cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.sprint_pressed);
+                    || (cfg!(target_os = "android")
+                        && cfg.touch_ui
+                        && (touch_buttons.sprint_pressed || touch_sticks.sprint_locked));
                 if sprint_pressed {
                     ctl.is_sprinting = true;
                 }

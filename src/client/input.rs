@@ -17,6 +17,7 @@ pub struct TouchStickState {
     pub move_touch_id: Option<u64>,
     pub radius: f32,
     pub dead_zone: f32,
+    pub sprint_locked: bool,
     pub active: bool,
 }
 
@@ -30,6 +31,8 @@ pub struct TouchButtonState {
     pub jump_just_pressed: bool,
     pub sprint_pressed: bool,
     pub sprint_just_pressed: bool,
+    pub crouch_pressed: bool,
+    pub crouch_just_pressed: bool,
 }
 
 impl Default for TouchStickState {
@@ -40,6 +43,7 @@ impl Default for TouchStickState {
             move_touch_id: None,
             radius: 120.0,
             dead_zone: 0.1,
+            sprint_locked: false,
             active: false,
         }
     }
@@ -78,9 +82,17 @@ fn stick_axis_from_touch(position: Vec2, center: Vec2, radius: f32, dead_zone: f
     if len > 1.0 {
         axis /= len;
     }
-    if axis.length() < dead_zone {
+    let len = axis.length();
+    if len < dead_zone {
         Vec2::ZERO
     } else {
+        // Slight response curve for quicker turn-in near edge while preserving precision in the center.
+        let normalized = ((len - dead_zone) / (1.0 - dead_zone)).clamp(0.0, 1.0);
+        let curved = normalized.powf(0.82);
+        let target_len = (dead_zone + curved * (1.0 - dead_zone)).clamp(0.0, 1.0);
+        if len > 0.0 {
+            axis = axis / len * target_len;
+        }
         axis
     }
 }
@@ -104,6 +116,7 @@ fn update_touch_sticks(
     if !enabled {
         state.move_axis = Vec2::ZERO;
         state.move_touch_id = None;
+        state.sprint_locked = false;
         return;
     }
 
@@ -131,6 +144,17 @@ fn update_touch_sticks(
     }
 
     let move_touch = state.move_touch_id.and_then(|id| touches.iter().find(|t| t.id() == id).map(|t| t.position()));
+
+    if let Some(p) = move_touch {
+        // Push joystick to top edge to latch sprint; pull down below center to release.
+        if p.y <= state.move_center.y - state.radius * 0.90 {
+            state.sprint_locked = true;
+        } else if p.y >= state.move_center.y + state.radius * 0.10 {
+            state.sprint_locked = false;
+        }
+    } else {
+        state.sprint_locked = false;
+    }
 
     state.move_axis = move_touch
         .map(|p| stick_axis_from_touch(p, state.move_center, state.radius, state.dead_zone))
