@@ -35,8 +35,10 @@ pub fn generate_chunk(chunk: &mut Chunk) {
                 let (val, mut tex) = match terrain_mode {
                     TerrainMode::Planet => {
                         let d = (p.as_vec3() - planet_center.as_vec3()).length();
-                        let f_terr = fbm.get((p.as_vec3() / 130.0).xz().to_array()) as f32;
-                        let f_3d = fbm.get((p.as_vec3() / 90.0).to_array()) as f32;
+                        let arr2 = (p.as_vec3() / 130.0).xz().to_array().map(|v| v as f64);
+                        let arr3 = (p.as_vec3() / 90.0).to_array().map(|v| v as f64);
+                        let f_terr = fbm.get(arr2) as f32;
+                        let f_3d = fbm.get(arr3) as f32;
                         let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 4.5;
                         let mut tex = VoxTex::Nil;
                         if val > 0.0 {

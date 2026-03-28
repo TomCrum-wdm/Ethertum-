@@ -7,7 +7,7 @@ pub mod ui;
 
 mod client_world;
 mod input;
-mod settings;
+pub mod settings;
 
 pub mod prelude {
     use super::*;

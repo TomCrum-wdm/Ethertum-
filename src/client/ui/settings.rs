@@ -52,6 +52,7 @@ pub fn ui_settings(
     mut query_char: Query<&mut CharacterController>,
     // chunk_sys: Option<ResMut<ClientChunkSystem>>,
     mut vox_brush: ResMut<crate::voxel::VoxelBrush>,
+    items: Res<crate::item::Items>,
     // mut global_volume: ResMut<GlobalVolume>,
 
     // mut cmds: Commands,
@@ -152,15 +153,13 @@ pub fn ui_settings(
                         ui_setting_line(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25));
 
                         // 新增：示例显示第一个物品的物理属性（后续可完善为热栏/背包界面显示）
-                        if let Some(items) = ctx.world().get_resource::<crate::item::Items>() {
-                            if let Some(def) = items.defs.get(0) {
-                                ui.separator();
-                                ui.label(format!("物品: {}", def.name));
-                                ui.label(format!("质量: {:.3} kg", def.props.mass));
-                                ui.label(format!("体积: {:.5} m³", def.props.volume));
-                                ui.label(format!("密度: {:.1} kg/m³", def.props.density));
-                                ui.label(format!("摩尔质量: {:.2} g/mol", def.props.molar_mass));
-                            }
+                        if let Some(def) = items.defs.get(0) {
+                            ui.separator();
+                            ui.label(format!("物品: {}", def.name));
+                            ui.label(format!("质量: {:.3} kg", def.props.mass));
+                            ui.label(format!("体积: {:.5} m³", def.props.volume));
+                            ui.label(format!("密度: {:.1} kg/m³", def.props.density));
+                            ui.label(format!("摩尔质量: {:.2} g/mol", def.props.molar_mass));
                         }
 
                         if let Some(worldinfo) = &mut worldinfo {

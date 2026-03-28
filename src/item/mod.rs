@@ -94,6 +94,7 @@ impl Plugin for ItemPlugin {
 #[derive(Resource, Default)]
 pub struct Items {
     pub reg: Registry,
+    pub defs: Vec<ItemDef>,
     pub atlas: Handle<Image>,
     pub atlas_egui: bevy_egui::egui::TextureId,
 
