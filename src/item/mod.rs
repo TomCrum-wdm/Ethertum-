@@ -61,24 +61,7 @@ pub struct ItemDef {
 }
 
 /// 物品注册表，附带物理属性
-#[derive(Resource, Default)]
-pub struct Items {
-    pub reg: Registry,
-    pub atlas: Handle<Image>,
-    pub atlas_egui: bevy_egui::egui::TextureId,
-
-    pub apple: RegId,
-    pub coal: RegId,
-    pub stick: RegId,
-    pub frame: RegId,
-    pub lantern: RegId,
-    pub pickaxe: RegId,
-    pub shears: RegId,
-    pub grapple: RegId,
-    pub iron_ingot: RegId,
-
-    pub defs: Vec<ItemDef>, // 新增：物品定义表
-}
+// Items 结构体只定义一次，见下方
 
 #[derive(Default)]
 pub struct Inventory {
@@ -129,54 +112,55 @@ pub struct Items {
 }
 
 fn setup_items(
-        // 方块类物品注册及物理属性
-        let stone = reg.insert("stone");
-        defs.push(ItemDef {
-            name: "stone".to_string(),
-            props: MaterialProps { mass: 2.6, volume: 0.001, density: 2600.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let dirt = reg.insert("dirt");
-        defs.push(ItemDef {
-            name: "dirt".to_string(),
-            props: MaterialProps { mass: 1.2, volume: 0.001, density: 1200.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let grass = reg.insert("grass" );
-        defs.push(ItemDef {
-            name: "grass".to_string(),
-            props: MaterialProps { mass: 1.1, volume: 0.001, density: 1100.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let sand = reg.insert("sand");
-        defs.push(ItemDef {
-            name: "sand".to_string(),
-            props: MaterialProps { mass: 1.6, volume: 0.001, density: 1600.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let log = reg.insert("log");
-        defs.push(ItemDef {
-            name: "log".to_string(),
-            props: MaterialProps { mass: 0.7, volume: 0.001, density: 700.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let leaves = reg.insert("leaves");
-        defs.push(ItemDef {
-            name: "leaves".to_string(),
-            props: MaterialProps { mass: 0.3, volume: 0.001, density: 300.0, molar_mass: 0.0 },
-            category: ItemCategory::Main,
-        });
-        let water = reg.insert("water");
-        defs.push(ItemDef {
-            name: "water".to_string(),
-            props: MaterialProps { mass: 1.0, volume: 0.001, density: 1000.0, molar_mass: 18.0 },
-            category: ItemCategory::Main,
-        });
     mut items: ResMut<Items>,
     asset_server: Res<AssetServer>,
 ) {
     let reg = &mut items.reg;
     let mut defs = Vec::new();
+
+    // 方块类物品注册及物理属性
+    let stone = reg.insert("stone");
+    defs.push(ItemDef {
+        name: "stone".to_string(),
+        props: MaterialProps { mass: 2.6, volume: 0.001, density: 2600.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let dirt = reg.insert("dirt");
+    defs.push(ItemDef {
+        name: "dirt".to_string(),
+        props: MaterialProps { mass: 1.2, volume: 0.001, density: 1200.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let grass = reg.insert("grass");
+    defs.push(ItemDef {
+        name: "grass".to_string(),
+        props: MaterialProps { mass: 1.1, volume: 0.001, density: 1100.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let sand = reg.insert("sand");
+    defs.push(ItemDef {
+        name: "sand".to_string(),
+        props: MaterialProps { mass: 1.6, volume: 0.001, density: 1600.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let log = reg.insert("log");
+    defs.push(ItemDef {
+        name: "log".to_string(),
+        props: MaterialProps { mass: 0.7, volume: 0.001, density: 700.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let leaves = reg.insert("leaves");
+    defs.push(ItemDef {
+        name: "leaves".to_string(),
+        props: MaterialProps { mass: 0.3, volume: 0.001, density: 300.0, molar_mass: 0.0 },
+        category: ItemCategory::Main,
+    });
+    let water = reg.insert("water");
+    defs.push(ItemDef {
+        name: "water".to_string(),
+        props: MaterialProps { mass: 1.0, volume: 0.001, density: 1000.0, molar_mass: 18.0 },
+        category: ItemCategory::Main,
+    });
 
     // 注册物品及其物理属性
     let apple = reg.insert("apple");

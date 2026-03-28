@@ -1,4 +1,5 @@
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+use bevy::reflect::{Reflect, TypePath, FromReflect};
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Reflect, TypePath, FromReflect)]
 pub enum TerrainMode {
     Planet,
     Flat,
