@@ -224,6 +224,15 @@ pub struct ClientInfo {
     pub skylight_shadow: bool,
     pub skylight_illuminance: f32,
 
+    pub render_fxaa: bool,
+    pub render_tonemapping: bool,
+    pub render_bloom: bool,
+    pub render_ssr: bool,
+    pub render_volumetric_fog: bool,
+    pub render_skybox: bool,
+
+    pub touch_controls_edit_mode: bool,
+
     // Control
     pub enable_cursor_look: bool,
 
@@ -255,8 +264,17 @@ impl Default for ClientInfo {
             sky_inscattering_color: Color::srgb(110.0 / 255.0, 230.0 / 255.0, 1.0), // bevy demo: Color::rgb(0.7, 0.844, 1.0),
             sky_extinction_color: Color::srgb(0.35, 0.5, 0.66),
 
-            skylight_shadow: !cfg!(target_os = "android"),
+            skylight_shadow: true,
             skylight_illuminance: 20.,
+
+            render_fxaa: true,
+            render_tonemapping: true,
+            render_bloom: true,
+            render_ssr: true,
+            render_volumetric_fog: true,
+            render_skybox: true,
+
+            touch_controls_edit_mode: false,
 
             enable_cursor_look: true,
 

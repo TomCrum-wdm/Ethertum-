@@ -61,6 +61,154 @@ pub fn build_plugin(app: &mut App) {
     app.add_systems(Last, on_app_exit); // save settings
 }
 
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TouchActionBinding {
+    Attack,
+    UseItem,
+    Jump,
+    Sprint,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct TouchControlsConfig {
+    pub move_stick_pos: [f32; 2],
+    pub move_stick_radius: f32,
+    pub move_dead_zone: f32,
+
+    pub attack_button_pos: [f32; 2],
+    pub use_button_pos: [f32; 2],
+    pub jump_button_pos: [f32; 2],
+    pub sprint_button_pos: [f32; 2],
+    pub button_radius: f32,
+
+    pub attack_button_action: TouchActionBinding,
+    pub use_button_action: TouchActionBinding,
+    pub jump_button_action: TouchActionBinding,
+    pub sprint_button_action: TouchActionBinding,
+}
+
+impl Default for TouchControlsConfig {
+    fn default() -> Self {
+        Self {
+            move_stick_pos: [0.18, 0.80],
+            move_stick_radius: 120.0,
+            move_dead_zone: 0.10,
+
+            attack_button_pos: [0.84, 0.78],
+            use_button_pos: [0.72, 0.84],
+            jump_button_pos: [0.90, 0.66],
+            sprint_button_pos: [0.64, 0.68],
+            button_radius: 44.0,
+
+            attack_button_action: TouchActionBinding::Attack,
+            use_button_action: TouchActionBinding::UseItem,
+            jump_button_action: TouchActionBinding::Jump,
+            sprint_button_action: TouchActionBinding::Sprint,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct TouchLayoutPreset {
+    pub name: String,
+    pub layout: TouchControlsConfig,
+}
+
+impl Default for TouchLayoutPreset {
+    fn default() -> Self {
+        Self {
+            name: "Default".to_string(),
+            layout: TouchControlsConfig::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct KeyboardMouseControlsConfig {
+    pub look_sensitivity: f32,
+    pub invert_y: bool,
+    pub key_jump: String,
+    pub key_sprint: String,
+    pub key_sneak: String,
+    pub key_pause: String,
+}
+
+impl Default for KeyboardMouseControlsConfig {
+    fn default() -> Self {
+        Self {
+            look_sensitivity: 1.0,
+            invert_y: false,
+            key_jump: "Space".to_string(),
+            key_sprint: "LControl".to_string(),
+            key_sneak: "LShift".to_string(),
+            key_pause: "Escape".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct GamepadControlsConfig {
+    pub look_sensitivity: f32,
+    pub invert_y: bool,
+    pub left_stick_dead_zone: f32,
+    pub right_stick_dead_zone: f32,
+    pub button_jump: String,
+    pub button_sprint: String,
+    pub button_use: String,
+    pub button_attack: String,
+}
+
+impl Default for GamepadControlsConfig {
+    fn default() -> Self {
+        Self {
+            look_sensitivity: 1.0,
+            invert_y: false,
+            left_stick_dead_zone: 0.15,
+            right_stick_dead_zone: 0.12,
+            button_jump: "South(A/Cross)".to_string(),
+            button_sprint: "LeftThumb".to_string(),
+            button_use: "RightTrigger2".to_string(),
+            button_attack: "RightTrigger".to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(default)]
+pub struct ControlsConfig {
+    pub gamepad: GamepadControlsConfig,
+    pub keyboard_mouse: KeyboardMouseControlsConfig,
+    pub touch: TouchControlsConfig,
+    pub touch_layout_presets: Vec<TouchLayoutPreset>,
+
+    #[serde(skip)]
+    pub touch_layout_undo_stack: Vec<TouchControlsConfig>,
+    #[serde(skip)]
+    pub touch_layout_request_undo: bool,
+    #[serde(skip)]
+    pub touch_layout_share_text: String,
+    #[serde(skip)]
+    pub touch_layout_preset_name: String,
+}
+
+impl Default for ControlsConfig {
+    fn default() -> Self {
+        Self {
+            gamepad: GamepadControlsConfig::default(),
+            keyboard_mouse: KeyboardMouseControlsConfig::default(),
+            touch: TouchControlsConfig::default(),
+            touch_layout_presets: Vec::new(),
+            touch_layout_undo_stack: Vec::new(),
+            touch_layout_request_undo: false,
+            touch_layout_share_text: String::new(),
+            touch_layout_preset_name: String::new(),
+        }
+    }
+}
+
 #[derive(Resource, Deserialize, Serialize, Reflect)]
 #[reflect(Resource)]
 pub struct ClientSettings {
@@ -75,6 +223,10 @@ pub struct ClientSettings {
     pub touch_ui: bool,
 
     pub chunks_load_distance: IVec2,
+    
+    #[serde(default)]
+    #[reflect(ignore)]
+    pub controls: ControlsConfig,
 }
 
 impl Default for ClientSettings {
@@ -89,6 +241,8 @@ impl Default for ClientSettings {
             touch_ui: true,
 
             chunks_load_distance: IVec2::new(4, 3),
+            
+            controls: ControlsConfig::default(),
         }
     }
 }

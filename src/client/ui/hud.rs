@@ -10,7 +10,12 @@ use bevy_renet::renet::RenetClient;
 
 use crate::ui::prelude::*;
 use crate::{
-    client::prelude::*,
+    client::{
+        game_client::ClientInfo,
+        input::{TouchButtonState, TouchStickState},
+        settings::{ClientSettings, TouchActionBinding},
+        ui::CurrentUI,
+    },
     net::{CPacket, RenetClientHelper},
 };
 

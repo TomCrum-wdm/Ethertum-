@@ -20,6 +20,18 @@ pub struct TouchStickState {
     pub active: bool,
 }
 
+#[derive(Resource, Debug, Clone, Default)]
+pub struct TouchButtonState {
+    pub attack_pressed: bool,
+    pub attack_just_pressed: bool,
+    pub use_pressed: bool,
+    pub use_just_pressed: bool,
+    pub jump_pressed: bool,
+    pub jump_just_pressed: bool,
+    pub sprint_pressed: bool,
+    pub sprint_just_pressed: bool,
+}
+
 impl Default for TouchStickState {
     fn default() -> Self {
         Self {
@@ -38,6 +50,7 @@ pub fn init(app: &mut App) {
     app.add_systems(Update, super::input::input_handle);
     app.add_plugins(InputManagerPlugin::<InputAction>::default());
     app.insert_resource(TouchStickState::default());
+    app.insert_resource(TouchButtonState::default());
 
     #[cfg(target_os = "android")]
     {
@@ -86,7 +99,7 @@ fn update_touch_sticks(
         return;
     };
 
-    let enabled = cfg.touch_ui && cli.curr_ui == CurrentUI::None;
+    let enabled = cfg.touch_ui && cli.curr_ui == CurrentUI::None && !cli.touch_controls_edit_mode;
     state.active = enabled;
     if !enabled {
         state.move_axis = Vec2::ZERO;
@@ -95,24 +108,25 @@ fn update_touch_sticks(
     }
 
     let size = Vec2::new(window.resolution.width(), window.resolution.height());
-    let left_bottom_area = Rect {
-        min: Vec2::new(0., size.y * 0.55),
-        max: Vec2::new(size.x * 0.5, size.y),
-    };
+    let touch_cfg = &cfg.controls.touch;
+    let stick_center = Vec2::new(
+        touch_cfg.move_stick_pos[0].clamp(0.05, 0.95) * size.x,
+        touch_cfg.move_stick_pos[1].clamp(0.05, 0.95) * size.y,
+    );
+    state.move_center = stick_center;
+    state.radius = touch_cfg.move_stick_radius.clamp(48.0, 200.0);
+    state.dead_zone = touch_cfg.move_dead_zone.clamp(0.0, 0.9);
 
-    // Keep an adaptive move stick center where touch started in left-bottom area.
     if let Some(id) = state.move_touch_id {
-        if let Some(touch) = touches.iter().find(|t| t.id() == id) {
-            state.move_center = touch.position();
-        } else {
+        if touches.iter().all(|t| t.id() != id) {
             state.move_touch_id = None;
         }
     }
 
     if state.move_touch_id.is_none() {
-        if let Some(touch) = touches.iter().find(|t| left_bottom_area.contains(t.position())) {
+        let activate_radius = state.radius * 1.4;
+        if let Some(touch) = touches.iter().find(|t| t.position().distance(stick_center) <= activate_radius) {
             state.move_touch_id = Some(touch.id());
-            state.move_center = touch.position();
         }
     }
 

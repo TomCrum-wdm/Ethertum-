@@ -151,6 +151,7 @@ fn input_move(
     touches: Res<Touches>,
     cfg: Res<ClientSettings>,
     touch_sticks: Res<TouchStickState>,
+    touch_buttons: Res<TouchButtonState>,
 
     time: Res<Time>,
     query_input: Query<&ActionState<InputAction>>,
@@ -192,6 +193,11 @@ fn input_move(
 
             // Touch look handling.
             if cfg!(target_os = "android") && cfg.touch_ui {
+                let block_touch_look = touch_buttons.attack_pressed
+                    || touch_buttons.use_pressed
+                    || touch_buttons.jump_pressed
+                    || touch_buttons.sprint_pressed;
+                if !block_touch_look {
                 for touch in touches.iter() {
                     if touch_sticks.move_touch_id == Some(touch.id()) {
                         continue;
@@ -199,6 +205,7 @@ fn input_move(
                     let mov = touch.delta();
                     ctl.pitch -= look_sensitivity * mov.y;
                     ctl.yaw -= look_sensitivity * mov.x;
+                }
                 }
             } else {
                 for touch in touches.iter() {
@@ -287,8 +294,11 @@ fn input_move(
 
             ctl.is_sneaking = action_state.pressed(&InputAction::Sneak);
 
-            let is_jump_just_pressed = action_state.just_pressed(&InputAction::Jump);
-            let is_jump_hold = action_state.pressed(&InputAction::Jump);
+            let touch_jump_pressed = cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.jump_pressed;
+            let touch_jump_just_pressed = cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.jump_just_pressed;
+
+            let is_jump_just_pressed = action_state.just_pressed(&InputAction::Jump) || touch_jump_just_pressed;
+            let is_jump_hold = action_state.pressed(&InputAction::Jump) || touch_jump_pressed;
 
             // Is Grouned
             // The character is grounded if the shape caster has a hit with a normal that isn't too steep.
@@ -326,7 +336,9 @@ fn input_move(
 
             // Input Sprint
             if is_move_forward {
-                if action_state.pressed(&InputAction::Sprint) {
+                let sprint_pressed = action_state.pressed(&InputAction::Sprint)
+                    || (cfg!(target_os = "android") && cfg.touch_ui && touch_buttons.sprint_pressed);
+                if sprint_pressed {
                     ctl.is_sprinting = true;
                 }
             } else {

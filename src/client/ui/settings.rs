@@ -155,10 +155,6 @@ pub fn ui_settings(
 
                         ui_setting_line(ui, "VSync", egui::Checkbox::new(&mut cfg.vsync, ""));
 
-                        ui_setting_line(ui, "Skylight Shadow", egui::Checkbox::new(&mut cli.skylight_shadow, ""));
-
-                        ui_setting_line(ui, "Skylight Illuminance", egui::Slider::new(&mut cli.skylight_illuminance, 0.1..=200.0));
-
                         ui.label("UI");
 
                         //ui_setting_line(ui, "UI Scale", egui::Slider::new(&mut egui_settings.scale_factor, 0.5..=2.5));
@@ -173,12 +169,206 @@ pub fn ui_settings(
                     SettingsPanel::CurrentWorld => {
                     }
                     SettingsPanel::Graphics => {
+                        ui.label("Render Effects");
+
+                        ui_setting_line(ui, "FXAA", egui::Checkbox::new(&mut cli.render_fxaa, ""));
+                        ui_setting_line(ui, "Tonemapping", egui::Checkbox::new(&mut cli.render_tonemapping, ""));
+                        ui_setting_line(ui, "Bloom", egui::Checkbox::new(&mut cli.render_bloom, ""));
+                        ui_setting_line(ui, "Screen Space Reflections", egui::Checkbox::new(&mut cli.render_ssr, ""));
+                        ui_setting_line(ui, "Volumetric Fog", egui::Checkbox::new(&mut cli.render_volumetric_fog, ""));
+                        ui_setting_line(ui, "Skybox + EnvMap", egui::Checkbox::new(&mut cli.render_skybox, ""));
+
+                        ui.label("Lighting");
+                        ui_setting_line(ui, "Skylight Shadow", egui::Checkbox::new(&mut cli.skylight_shadow, ""));
+                        ui_setting_line(ui, "Skylight Illuminance", egui::Slider::new(&mut cli.skylight_illuminance, 0.1..=200.0));
+
+                        ui.label("Quality Profile");
+                        ui_setting_line(ui, "High Quality Rendering", egui::Checkbox::new(&mut cfg.high_quality_rendering, ""));
                     }
                     SettingsPanel::Audio => {
 
                         // ui_setting_line(ui, "Global Volume", egui::Slider::new(&mut global_volume.volume as &mut f32, 0.0..=1.0));
                     }
                     SettingsPanel::Controls => {
+                        ui.label("Input Schemes");
+                        ui_setting_line(ui, "Touch UI (large buttons)", egui::Checkbox::new(&mut cfg.touch_ui, ""));
+
+                        ui.separator();
+                        ui.label("Keyboard + Mouse");
+                        ui_setting_line(
+                            ui,
+                            "Look Sensitivity",
+                            egui::Slider::new(&mut cfg.controls.keyboard_mouse.look_sensitivity, 0.1..=4.0),
+                        );
+                        ui_setting_line(ui, "Invert Y", egui::Checkbox::new(&mut cfg.controls.keyboard_mouse.invert_y, ""));
+                        ui_setting_line(ui, "Jump Key", egui::TextEdit::singleline(&mut cfg.controls.keyboard_mouse.key_jump));
+                        ui_setting_line(ui, "Sprint Key", egui::TextEdit::singleline(&mut cfg.controls.keyboard_mouse.key_sprint));
+                        ui_setting_line(ui, "Sneak Key", egui::TextEdit::singleline(&mut cfg.controls.keyboard_mouse.key_sneak));
+                        ui_setting_line(ui, "Pause Key", egui::TextEdit::singleline(&mut cfg.controls.keyboard_mouse.key_pause));
+
+                        ui.separator();
+                        ui.label("Gamepad");
+                        ui_setting_line(
+                            ui,
+                            "Look Sensitivity",
+                            egui::Slider::new(&mut cfg.controls.gamepad.look_sensitivity, 0.1..=4.0),
+                        );
+                        ui_setting_line(ui, "Invert Y", egui::Checkbox::new(&mut cfg.controls.gamepad.invert_y, ""));
+                        ui_setting_line(
+                            ui,
+                            "Left Stick Dead Zone",
+                            egui::Slider::new(&mut cfg.controls.gamepad.left_stick_dead_zone, 0.0..=0.5),
+                        );
+                        ui_setting_line(
+                            ui,
+                            "Right Stick Dead Zone",
+                            egui::Slider::new(&mut cfg.controls.gamepad.right_stick_dead_zone, 0.0..=0.5),
+                        );
+                        ui_setting_line(ui, "Jump Button", egui::TextEdit::singleline(&mut cfg.controls.gamepad.button_jump));
+                        ui_setting_line(ui, "Sprint Button", egui::TextEdit::singleline(&mut cfg.controls.gamepad.button_sprint));
+                        ui_setting_line(ui, "Use Button", egui::TextEdit::singleline(&mut cfg.controls.gamepad.button_use));
+                        ui_setting_line(ui, "Attack Button", egui::TextEdit::singleline(&mut cfg.controls.gamepad.button_attack));
+
+                        ui.separator();
+                        ui.label("Touch");
+                        ui_setting_line(ui, "Layout Edit Mode", egui::Checkbox::new(&mut cli.touch_controls_edit_mode, ""));
+                        if ui.button("Undo Last Drag").clicked() {
+                            cfg.controls.touch_layout_request_undo = true;
+                        }
+                        if cli.touch_controls_edit_mode {
+                            ui.colored_label(
+                                Color32::from_rgb(255, 214, 140),
+                                "Designer Active: drag joystick and buttons on the overlay. Gameplay touch input is locked.",
+                            );
+                        } else {
+                            ui.colored_label(
+                                Color32::from_gray(170),
+                                "Enable Layout Edit Mode to open the visual touch UI designer.",
+                            );
+                        }
+                        ui_setting_line(
+                            ui,
+                            "Move Stick Radius",
+                            egui::Slider::new(&mut cfg.controls.touch.move_stick_radius, 48.0..=200.0),
+                        );
+                        ui_setting_line(
+                            ui,
+                            "Move Dead Zone",
+                            egui::Slider::new(&mut cfg.controls.touch.move_dead_zone, 0.0..=0.5),
+                        );
+                        ui_setting_line(
+                            ui,
+                            "Button Radius",
+                            egui::Slider::new(&mut cfg.controls.touch.button_radius, 30.0..=80.0),
+                        );
+
+                        ui.separator();
+                        ui.label("Touch Button Action Mapping");
+                        egui::ComboBox::from_label("Attack Button Action")
+                            .selected_text(format!("{:?}", cfg.controls.touch.attack_button_action))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Attack, "Attack");
+                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::UseItem, "UseItem");
+                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Jump, "Jump");
+                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sprint, "Sprint");
+                            });
+                        egui::ComboBox::from_label("Use Button Action")
+                            .selected_text(format!("{:?}", cfg.controls.touch.use_button_action))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Attack, "Attack");
+                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::UseItem, "UseItem");
+                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Jump, "Jump");
+                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sprint, "Sprint");
+                            });
+                        egui::ComboBox::from_label("Jump Button Action")
+                            .selected_text(format!("{:?}", cfg.controls.touch.jump_button_action))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Attack, "Attack");
+                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::UseItem, "UseItem");
+                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Jump, "Jump");
+                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sprint, "Sprint");
+                            });
+                        egui::ComboBox::from_label("Sprint Button Action")
+                            .selected_text(format!("{:?}", cfg.controls.touch.sprint_button_action))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Attack, "Attack");
+                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::UseItem, "UseItem");
+                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Jump, "Jump");
+                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sprint, "Sprint");
+                            });
+
+                        if ui.button("Reset Touch Layout").clicked() {
+                            cfg.controls.touch = Default::default();
+                            cli.touch_controls_edit_mode = false;
+                        }
+
+                        ui.separator();
+                        ui.label("Touch Layout Presets");
+                        ui_setting_line(
+                            ui,
+                            "Preset Name",
+                            egui::TextEdit::singleline(&mut cfg.controls.touch_layout_preset_name),
+                        );
+                        if ui.button("Save Current Layout As Preset").clicked() {
+                            let mut name = cfg.controls.touch_layout_preset_name.trim().to_string();
+                            let current_layout = cfg.controls.touch.clone();
+                            if name.is_empty() {
+                                name = format!("Preset {}", cfg.controls.touch_layout_presets.len() + 1);
+                            }
+                            if let Some(existing) = cfg.controls.touch_layout_presets.iter_mut().find(|p| p.name == name) {
+                                existing.layout = current_layout;
+                            } else {
+                                cfg.controls.touch_layout_presets.push(crate::client::settings::TouchLayoutPreset {
+                                    name,
+                                    layout: current_layout,
+                                });
+                            }
+                        }
+
+                        let mut remove_idx: Option<usize> = None;
+                        let preset_rows = cfg
+                            .controls
+                            .touch_layout_presets
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| (i, p.name.clone(), p.layout.clone()))
+                            .collect::<Vec<_>>();
+                        for (i, preset_name, preset_layout) in preset_rows {
+                            ui.horizontal(|ui| {
+                                if ui.button(format!("Load: {}", preset_name)).clicked() {
+                                    cfg.controls.touch = preset_layout.clone();
+                                    cli.touch_controls_edit_mode = true;
+                                }
+                                if ui.button("Delete").clicked() {
+                                    remove_idx = Some(i);
+                                }
+                            });
+                        }
+                        if let Some(i) = remove_idx {
+                            cfg.controls.touch_layout_presets.remove(i);
+                        }
+
+                        ui.separator();
+                        ui.label("Share Touch Layout");
+                        ui.add_sized(
+                            [ui.available_width(), 66.0],
+                            egui::TextEdit::multiline(&mut cfg.controls.touch_layout_share_text)
+                                .hint_text("Layout JSON for sharing/import"),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button("Export + Copy").clicked() {
+                                if let Ok(text) = serde_json::to_string(&cfg.controls.touch) {
+                                    cfg.controls.touch_layout_share_text = text;
+                                    ui.ctx().copy_text(cfg.controls.touch_layout_share_text.clone());
+                                }
+                            }
+                            if ui.button("Import From Text").clicked() {
+                                if let Ok(layout) = serde_json::from_str::<crate::client::settings::TouchControlsConfig>(&cfg.controls.touch_layout_share_text) {
+                                    cfg.controls.touch = layout;
+                                    cli.touch_controls_edit_mode = true;
+                                }
+                            }
+                        });
                     }
                     SettingsPanel::Language => {}
                     SettingsPanel::Mods => {}

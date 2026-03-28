@@ -478,10 +478,12 @@ fn raycast(
     query_player: Query<Entity, With<CharacterController>>,              // exclude collider
     mut hit_result: ResMut<HitResult>,
     touches: Res<Touches>,
+    touch_buttons: Res<TouchButtonState>,
 
     query_input: Query<&ActionState<InputAction>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
     cli: Res<ClientInfo>,
+    cfg: Res<ClientSettings>,
     vox_brush: Res<VoxelBrush>,
 ) {
     let Ok(cam_trans) = query_cam.single() else {
@@ -531,12 +533,20 @@ fn raycast(
     let touch_count_just_pressed = touches.iter_just_pressed().count();
 
     #[cfg(target_os = "android")]
-    let do_break = action_state.just_pressed(&InputAction::Attack) || touch_count_just_pressed == 1;
+    let do_break = if cfg.touch_ui {
+        action_state.just_pressed(&InputAction::Attack) || touch_buttons.attack_just_pressed
+    } else {
+        action_state.just_pressed(&InputAction::Attack) || touch_count_just_pressed == 1
+    };
     #[cfg(not(target_os = "android"))]
     let do_break = action_state.just_pressed(&InputAction::Attack);
 
     #[cfg(target_os = "android")]
-    let do_place = action_state.just_pressed(&InputAction::UseItem) || touch_count_just_pressed >= 2;
+    let do_place = if cfg.touch_ui {
+        action_state.just_pressed(&InputAction::UseItem) || touch_buttons.use_just_pressed
+    } else {
+        action_state.just_pressed(&InputAction::UseItem) || touch_count_just_pressed >= 2
+    };
     #[cfg(not(target_os = "android"))]
     let do_place = action_state.just_pressed(&InputAction::UseItem);
 
