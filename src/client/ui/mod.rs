@@ -60,6 +60,7 @@ impl Plugin for UiPlugin {
                 (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system),
             )
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
+            .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -252,6 +253,23 @@ fn setup_camera_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
+    spawn_main_camera(&mut commands, &asset_server);
+}
+
+fn ensure_world_camera_system(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    query_cam: Query<Entity, With<CharacterControllerCamera>>,
+) {
+    if !query_cam.is_empty() {
+        return;
+    }
+
+    error!("No CharacterControllerCamera found while world is loaded. Recreating fallback camera.");
+    spawn_main_camera(&mut commands, &asset_server);
+}
+
+fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
     // WARNING: 不应该产生多个Camera 否则SSR不支持 很多东西也会非预期的绘制多次如gizmos
     // commands.spawn((
     //     Camera2d::default(),
@@ -279,6 +297,9 @@ fn setup_camera_system(
                 ..default()
             },
             bevy::render::view::Hdr,
+            bevy::core_pipeline::prepass::DepthPrepass,
+            bevy::core_pipeline::prepass::DeferredPrepass,
+            bevy::core_pipeline::prepass::NormalPrepass,
             DistanceFog {
                 ..default()
             },
@@ -295,7 +316,6 @@ fn setup_camera_system(
             },
             CharacterControllerCamera,
             Name::new("Camera"),
-            DespawnOnWorldUnload,
             Msaa::Off,
         ));
 
@@ -320,13 +340,15 @@ fn setup_camera_system(
                 ..default()
             },
             bevy::render::view::Hdr,
+            bevy::core_pipeline::prepass::DepthPrepass,
+            bevy::core_pipeline::prepass::DeferredPrepass,
+            bevy::core_pipeline::prepass::NormalPrepass,
             DistanceFog {
                 color: Color::srgb(0.62, 0.72, 0.84),
                 ..default()
             },
             CharacterControllerCamera,
             Name::new("Camera"),
-            DespawnOnWorldUnload,
             Msaa::Off,
         ));
 
