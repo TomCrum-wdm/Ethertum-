@@ -19,7 +19,7 @@ mod packet;
 use crate::util::current_timestamp;
 pub use netproc_client::ClientNetworkPlugin;
 pub use netproc_server::ServerNetworkPlugin;
-pub use packet::{CPacket, CellData, SPacket};
+pub use packet::{CPacket, CellData, InventoryDeltaEntry, NetItemStack, SPacket};
 
 const PROTOCOL_ID: u64 = 1;
 

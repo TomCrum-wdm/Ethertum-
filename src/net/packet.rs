@@ -14,6 +14,18 @@ pub struct CellData {
     pub isoval: u8,
 }
 
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct NetItemStack {
+    pub count: u8,
+    pub item_id: u8,
+}
+
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct InventoryDeltaEntry {
+    pub slot: u16,
+    pub stack: NetItemStack,
+}
+
 impl CellData {
     pub fn from_cell(local_idx: u16, c: &Vox) -> Self {
         Self {
@@ -60,6 +72,11 @@ pub enum CPacket {
     PlayerPos { position: Vec3 },
 
     PlayerList, // RequestPlayerList
+
+    InventorySwap {
+        a: u16,
+        b: u16,
+    },
 
     ChunkModify { chunkpos: IVec3, voxel: Vec<CellData> },
 
@@ -110,6 +127,14 @@ pub enum SPacket {
     PlayerList {
         // name, ping
         playerlist: Vec<(String, u32)>,
+    },
+
+    InventorySync {
+        slots: Vec<NetItemStack>,
+    },
+
+    InventoryDelta {
+        changes: Vec<InventoryDeltaEntry>,
     },
 
     ChunkNew {

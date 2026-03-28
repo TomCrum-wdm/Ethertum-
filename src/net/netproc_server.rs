@@ -8,11 +8,32 @@ use bevy_renet::{
 };
 
 use crate::{
-    net::{packet::CellData, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
+    net::{packet::{CellData, InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
     server::prelude::*,
     util::{current_timestamp_millis, AsMutRef},
     voxel::{ChunkSystem, ServerChunkSystem},
 };
+
+fn starter_inventory() -> Vec<NetItemStack> {
+    let mut slots = vec![NetItemStack::default(); 36];
+    let starter = [
+        (0usize, NetItemStack { count: 1, item_id: 7 }),
+        (1usize, NetItemStack { count: 1, item_id: 8 }),
+        (2usize, NetItemStack { count: 1, item_id: 9 }),
+        (3usize, NetItemStack { count: 32, item_id: 5 }),
+        (4usize, NetItemStack { count: 16, item_id: 6 }),
+        (5usize, NetItemStack { count: 48, item_id: 4 }),
+        (6usize, NetItemStack { count: 24, item_id: 3 }),
+        (7usize, NetItemStack { count: 8, item_id: 10 }),
+        (8usize, NetItemStack { count: 12, item_id: 1 }),
+    ];
+    for (idx, stack) in starter {
+        if let Some(slot) = slots.get_mut(idx) {
+            *slot = stack;
+        }
+    }
+    slots
+}
 
 pub struct ServerNetworkPlugin;
 
@@ -78,6 +99,10 @@ pub fn server_sys(
                 info!("Cli Disconnected {} {}", client_id, reason);
 
                 if let Some(player) = serverinfo.online_players.remove(client_id) {
+                    serverinfo
+                        .saved_inventories
+                        .insert(player.username.clone(), player.inventory.clone());
+
                     server.broadcast_packet_chat(format!("Player {} left. ({}/N)", player.username, serverinfo.online_players.len()));
 
                     server.broadcast_packet(&SPacket::EntityDel { entity_id: player.entity_id });
@@ -136,6 +161,13 @@ pub fn server_sys(
                     // Login Success
                     server.send_packet(client_id, &SPacket::LoginSuccess { player_entity: entity_id });
 
+                    let inventory = serverinfo
+                        .saved_inventories
+                        .get(&username)
+                        .cloned()
+                        .unwrap_or_else(starter_inventory);
+                    server.send_packet(client_id, &SPacket::InventorySync { slots: inventory.clone() });
+
                     server.broadcast_packet_chat(format!("Player {} joined. ({}/N)", &username, serverinfo.online_players.len() + 1));
 
                     server.broadcast_packet_except(
@@ -175,6 +207,7 @@ pub fn server_sys(
                             chunks_loaded: HashSet::default(),
                             chunks_load_distance: IVec2::new(-1, -1), // 4 2
                             ping_rtt: 0,
+                            inventory,
                         },
                     );
                 }
@@ -253,6 +286,32 @@ pub fn server_sys(
                         CPacket::PlayerList => {
                             let playerlist = serverinfo.online_players.iter().map(|e| (e.1.username.clone(), e.1.ping_rtt)).collect();
                             server.send_packet(client_id, &SPacket::PlayerList { playerlist });
+                        }
+                        CPacket::InventorySwap { a, b } => {
+                            let a_idx = a as usize;
+                            let b_idx = b as usize;
+                            if a_idx >= player.inventory.len() || b_idx >= player.inventory.len() {
+                                warn!("InventorySwap out of range: {} <-> {}", a, b);
+                                continue;
+                            }
+
+                            player.inventory.swap(a_idx, b_idx);
+
+                            server.send_packet(
+                                client_id,
+                                &SPacket::InventoryDelta {
+                                    changes: vec![
+                                        InventoryDeltaEntry {
+                                            slot: a,
+                                            stack: player.inventory[a_idx],
+                                        },
+                                        InventoryDeltaEntry {
+                                            slot: b,
+                                            stack: player.inventory[b_idx],
+                                        },
+                                    ],
+                                },
+                            );
                         }
                         // CPacket::ChunkModify { chunkpos, voxel } => {
                         // todo: NonLock

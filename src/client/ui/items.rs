@@ -1,20 +1,40 @@
-use bevy::prelude::Res;
+use bevy::prelude::{Res, ResMut, Resource};
 use bevy_egui::egui::Painter;
-use std::sync::Mutex;
 
 use crate::{
+    client::prelude::CurrentUI,
     item::{Inventory, ItemStack, Items},
+    net::{CPacket, RenetClientHelper},
     ui::prelude::*,
 };
 
-static UI_HOLDING_ITEM: Mutex<ItemStack> = Mutex::new(ItemStack { count: 0, item_id: 0 });
+#[derive(Resource, Default)]
+pub struct InventoryUiState {
+    pub holding_slot: Option<usize>,
+    pub pending_swaps: Vec<(u16, u16)>,
+}
 
-pub fn draw_ui_holding_item(mut ctx: EguiContexts, items: Option<Res<Items>>) {
+pub fn draw_ui_holding_item(
+    mut ctx: EguiContexts,
+    items: Option<Res<Items>>,
+    player: Option<Res<crate::client::prelude::ClientPlayerInfo>>,
+    ui_state: Option<Res<InventoryUiState>>,
+) {
     let Some(items) = items else {
         return;
     };
+    let Some(player) = player else {
+        return;
+    };
+    let Some(ui_state) = ui_state else {
+        return;
+    };
 
-    let Ok(hold) = UI_HOLDING_ITEM.lock() else {
+    let Some(slot_idx) = ui_state.holding_slot else {
+        return;
+    };
+
+    let Some(hold) = player.inventory.items.get(slot_idx) else {
         return;
     };
 
@@ -27,7 +47,7 @@ pub fn draw_ui_holding_item(mut ctx: EguiContexts, items: Option<Res<Items>>) {
         };
         let size = vec2(50., 50.);
 
-        draw_item(&hold, Rect::from_min_size(curpos - size / 2., size), &ctx_mut.debug_painter(), &items);
+        draw_item(hold, Rect::from_min_size(curpos - size / 2., size), &ctx_mut.debug_painter(), &items);
     }
 }
 
@@ -56,7 +76,7 @@ pub fn draw_item(slot: &ItemStack, rect: Rect, painter: &Painter, items: &Items)
     );
 }
 
-pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack, items: &Items) {
+pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack, slot_idx: usize, items: &Items, ui_state: &mut InventoryUiState) {
     let num_all_items = items.reg.len();
 
     let slot_btn = egui::Button::new("").fill(Color32::from_black_alpha(100));
@@ -80,21 +100,45 @@ pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack, items: &Items) {
     }
 
     if resp.clicked() {
-        if let Ok(mut hold) = UI_HOLDING_ITEM.lock() {
-            ItemStack::swap(&mut hold, slot);
+        if let Some(hold_idx) = ui_state.holding_slot {
+            if hold_idx != slot_idx {
+                ui_state.pending_swaps.push((hold_idx as u16, slot_idx as u16));
+            }
+            ui_state.holding_slot = None;
+        } else {
+            ui_state.holding_slot = Some(slot_idx);
         }
     } else if resp.secondary_clicked() {
-        slot.count += 1;
-        slot.item_id += 1;
+        // Right click currently reserved; do not mutate local inventory in authoritative mode.
     }
 }
 
-pub fn ui_inventory(ui: &mut egui::Ui, inv: &mut Inventory, items: &Items) -> InnerResponse<()> {
+pub fn ui_inventory(ui: &mut egui::Ui, inv: &mut Inventory, items: &Items, ui_state: &mut InventoryUiState) -> InnerResponse<()> {
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
         ui.style_mut().spacing.item_spacing = vec2(4., 4.);
 
-        for item in inv.items.iter_mut() {
-            ui_item_stack(ui, item, items);
+        for (idx, item) in inv.items.iter_mut().enumerate() {
+            ui_item_stack(ui, item, idx, items, ui_state);
         }
     })
+}
+
+pub fn flush_inventory_ui_ops(
+    mut ui_state: ResMut<InventoryUiState>,
+    mut net_client: Option<ResMut<bevy_renet::renet::RenetClient>>,
+    cli: Res<crate::client::prelude::ClientInfo>,
+) {
+    if cli.curr_ui == CurrentUI::MainMenu {
+        ui_state.holding_slot = None;
+        ui_state.pending_swaps.clear();
+        return;
+    }
+
+    let Some(net_client) = net_client.as_mut() else {
+        return;
+    };
+
+    for (a, b) in ui_state.pending_swaps.drain(..) {
+        net_client.send_packet(&CPacket::InventorySwap { a, b });
+    }
 }

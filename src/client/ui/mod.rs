@@ -44,6 +44,7 @@ struct UiState {
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>();
+        app.init_resource::<items::InventoryUiState>();
         app.insert_resource(hud::ChatHistory::default());
         if !app.is_plugin_added::<EguiPlugin>() {
             app.add_plugins(EguiPlugin::default());
@@ -61,6 +62,8 @@ impl Plugin for UiPlugin {
             )
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
+            .add_systems(Update, sync_camera_render_effects_system)
+            .add_systems(Update, items::flush_inventory_ui_ops.run_if(condition::in_world))
             .add_systems(
                 EguiPrimaryContextPass,
                 (
@@ -332,7 +335,13 @@ fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
 
     #[cfg(target_os = "android")]
     {
-        // Android path: keep it lightweight but preserve core post effects for correct scene presentation.
+        // Android path: keep deferred features aligned with material shaders.
+        let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
+        commands.insert_resource(crate::client::client_world::SkyboxCubemap {
+            is_loaded: false,
+            image_handle: skybox_image.clone(),
+        });
+
         let mut camera_entity = commands.spawn((
             Camera3d::default(),
             Camera {
@@ -347,14 +356,132 @@ fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
                 color: Color::srgb(0.62, 0.72, 0.84),
                 ..default()
             },
+            Skybox {
+                image: skybox_image.clone(),
+                brightness: 1000.0,
+                ..Default::default()
+            },
+            EnvironmentMapLight {
+                diffuse_map: skybox_image.clone(),
+                specular_map: skybox_image.clone(),
+                intensity: 1000.0,
+                ..Default::default()
+            },
             CharacterControllerCamera,
             Name::new("Camera"),
             Msaa::Off,
         ));
 
         camera_entity
+            .insert(ScreenSpaceReflections::default())
+            .insert(Fxaa::default())
             .insert(Tonemapping::TonyMcMapface)
-            .insert(Bloom::default());
+            .insert(Bloom::default())
+            .insert(bevy::light::VolumetricFog {
+                ambient_intensity: 0.,
+                ..default()
+            });
+    }
+}
+
+fn sync_camera_render_effects_system(
+    mut commands: Commands,
+    cli: Res<ClientInfo>,
+    skybox_cubemap: Option<Res<crate::client::client_world::SkyboxCubemap>>,
+    query_cam: Query<(
+        Entity,
+        Option<&Skybox>,
+        Option<&EnvironmentMapLight>,
+        Option<&Fxaa>,
+        Option<&Tonemapping>,
+        Option<&Bloom>,
+        Option<&ScreenSpaceReflections>,
+        Option<&bevy::light::VolumetricFog>,
+    ), With<CharacterControllerCamera>>,
+) {
+    let Ok((
+        camera_entity,
+        has_skybox,
+        has_envmap,
+        has_fxaa,
+        has_tonemapping,
+        has_bloom,
+        has_ssr,
+        has_vol_fog,
+    )) = query_cam.single() else {
+        return;
+    };
+
+    let mut ent = commands.entity(camera_entity);
+
+    if cli.render_fxaa {
+        if has_fxaa.is_none() {
+            ent.insert(Fxaa::default());
+        }
+    } else if has_fxaa.is_some() {
+        ent.remove::<Fxaa>();
+    }
+
+    if cli.render_tonemapping {
+        if has_tonemapping.is_none() {
+            ent.insert(Tonemapping::TonyMcMapface);
+        }
+    } else if has_tonemapping.is_some() {
+        ent.remove::<Tonemapping>();
+    }
+
+    if cli.render_bloom {
+        if has_bloom.is_none() {
+            ent.insert(Bloom::default());
+        }
+    } else if has_bloom.is_some() {
+        ent.remove::<Bloom>();
+    }
+
+    if cli.render_ssr {
+        if has_ssr.is_none() {
+            ent.insert(ScreenSpaceReflections::default());
+        }
+    } else if has_ssr.is_some() {
+        ent.remove::<ScreenSpaceReflections>();
+    }
+
+    if cli.render_volumetric_fog {
+        if has_vol_fog.is_none() {
+            ent.insert(bevy::light::VolumetricFog {
+                ambient_intensity: 0.,
+                ..default()
+            });
+        }
+    } else if has_vol_fog.is_some() {
+        ent.remove::<bevy::light::VolumetricFog>();
+    }
+
+    if cli.render_skybox {
+        if let Some(cubemap) = skybox_cubemap {
+            if has_skybox.is_none() {
+                ent.insert(Skybox {
+                    image: cubemap.image_handle.clone(),
+                    brightness: 1000.0,
+                    ..Default::default()
+                });
+            }
+            if has_envmap.is_none() {
+                ent.insert(EnvironmentMapLight {
+                    diffuse_map: cubemap.image_handle.clone(),
+                    specular_map: cubemap.image_handle.clone(),
+                    intensity: 1000.0,
+                    ..Default::default()
+                });
+            }
+        }
+    } else {
+        if has_skybox.is_some() {
+            ent.remove::<Skybox>();
+        }
+        if has_envmap.is_some() {
+            ent.remove::<EnvironmentMapLight>();
+        }
     }
 }
 

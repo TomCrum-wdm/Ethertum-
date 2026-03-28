@@ -40,10 +40,10 @@ pub fn client_sys(
     cfg: Res<ClientSettings>,
 
     mut chats: ResMut<crate::client::ui::hud::ChatHistory>,
+    mut player_info: ResMut<ClientPlayerInfo>,
     mut cmds: Commands,
     mut chunk_sys: ResMut<ClientChunkSystem>,
     mut worldinfo: ResMut<WorldInfo>,
-
     // 临时测试 待移除:
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -163,6 +163,24 @@ pub fn client_sys(
             }
             SPacket::PlayerList { playerlist } => {
                 cli.playerlist.clone_from(playerlist); // should move?
+            }
+            SPacket::InventorySync { slots } => {
+                let mut inventory = slots
+                    .iter()
+                    .map(|s| ItemStack::new(s.count, s.item_id))
+                    .collect::<Vec<_>>();
+                if inventory.len() < 36 {
+                    inventory.resize(36, ItemStack::default());
+                }
+                player_info.inventory.items = inventory;
+            }
+            SPacket::InventoryDelta { changes } => {
+                for ch in changes {
+                    let idx = ch.slot as usize;
+                    if let Some(slot) = player_info.inventory.items.get_mut(idx) {
+                        *slot = ItemStack::new(ch.stack.count, ch.stack.item_id);
+                    }
+                }
             }
             SPacket::WorldTime { daytime } => {
                 worldinfo.daytime = *daytime;

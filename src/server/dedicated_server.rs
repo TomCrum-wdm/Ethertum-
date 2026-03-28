@@ -5,7 +5,7 @@ use bevy::{
 use bevy_renet::renet::ClientId;
 
 use crate::{
-    net::{EntityId, ServerNetworkPlugin},
+    net::{EntityId, NetItemStack, ServerNetworkPlugin},
     voxel::ServerVoxelPlugin,
 };
 
@@ -47,16 +47,29 @@ impl Plugin for DedicatedServerPlugin {
 }
 
 const SERVER_SETTINGS_FILE: &str = "server.settings.json";
+const SERVER_PLAYERDATA_FILE: &str = "server.playerdata.json";
 
-fn on_init(mut cfg: ResMut<ServerSettings>) {
+fn on_init(mut cfg: ResMut<ServerSettings>, mut server_info: ResMut<ServerInfo>) {
     info!("Loading server settings from {SERVER_SETTINGS_FILE}");
 
-    if let Ok(c) = serde_json::from_str(&SERVER_SETTINGS_FILE) {
-        *cfg = c;
+    if let Ok(content) = std::fs::read_to_string(SERVER_SETTINGS_FILE) {
+        if let Ok(c) = serde_json::from_str(&content) {
+            *cfg = c;
+        }
+    }
+
+    if let Ok(content) = std::fs::read_to_string(SERVER_PLAYERDATA_FILE) {
+        match serde_json::from_str::<HashMap<String, Vec<NetItemStack>>>(&content) {
+            Ok(data) => {
+                server_info.saved_inventories = data;
+                info!("Loaded {} player inventories", server_info.saved_inventories.len());
+            }
+            Err(err) => warn!("Failed to parse {}: {}", SERVER_PLAYERDATA_FILE, err),
+        }
     }
 }
 
-fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ServerSettings>) {
+fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ServerSettings>, mut server_info: ResMut<ServerInfo>) {
     for _ in exit_events.read() {
         info!("Saving server settings to {SERVER_SETTINGS_FILE}");
         match serde_json::to_string_pretty(&*cfg) {
@@ -66,6 +79,27 @@ fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ServerSett
                 }
             }
             Err(err) => warn!("Failed to serialize server settings: {}", err),
+        }
+
+        let online_snapshots = server_info
+            .online_players
+            .values()
+            .map(|p| (p.username.clone(), p.inventory.clone()))
+            .collect::<Vec<_>>();
+
+        for (username, inventory) in online_snapshots {
+            server_info
+                .saved_inventories
+                .insert(username, inventory);
+        }
+
+        match serde_json::to_string_pretty(&server_info.saved_inventories) {
+            Ok(content) => {
+                if let Err(err) = std::fs::write(SERVER_PLAYERDATA_FILE, content) {
+                    warn!("Failed to save player data: {}", err);
+                }
+            }
+            Err(err) => warn!("Failed to serialize player data: {}", err),
         }
     }
 }
@@ -132,6 +166,7 @@ impl Default for ServerSettings {
 pub struct ServerInfo {
     // PlayerList
     pub online_players: HashMap<ClientId, PlayerInfo>,
+    pub saved_inventories: HashMap<String, Vec<NetItemStack>>,
 }
 
 pub struct PlayerInfo {
@@ -147,6 +182,8 @@ pub struct PlayerInfo {
     pub chunks_load_distance: IVec2,
 
     pub chunks_loaded: HashSet<IVec3>,
+
+    pub inventory: Vec<NetItemStack>,
 }
 
 impl PlayerInfo {
