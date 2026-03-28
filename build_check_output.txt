@@ -1,0 +1,541 @@
+﻿cargo : warning: unused import: `transform::TransformSystems`
+所在位置 行:1 字符: 1
++ cargo check -p ethertia 2>&1 | Out-File -Encoding utf8 build_check_ou ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: unused...ansformSystems` 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ --> src\client\character_controller.rs:8:17
+  |
+8 |     prelude::*, transform::TransformSystems,
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `light::DirectionalLightShadowMap`
+ --> src\client\game_client.rs:3:50
+  |
+3 | use bevy::{ecs::system::SystemParam, math::vec3, light::DirectionalLightSha
+dowMap, prelude::*};
+  |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^
+
+warning: unused import: `bevy_atmosphere::prelude::*`
+ --> src\client\game_client.rs:8:5
+  |
+8 | use bevy_atmosphere::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unexpected `cfg` condition value: `bevy-inspector-egui`
+  --> src\client\game_client.rs:89:19
+   |
+89 |             #[cfg(feature = "bevy-inspector-egui")]
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `ddgi`, `ddgi2`, `default`, `expe
+rimental_channel`, `target_native_os`, and `target_web`
+   = help: consider adding `bevy-inspector-egui` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifi
+cs.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unused import: `as_mut`
+  --> src\client\ui\debug.rs:17:12
+   |
+17 |     util::{as_mut, AsMutRef},
+   |            ^^^^^^
+
+warning: unused imports: `ChunkSystem`, `ClientChunkSystem`, and `VoxShape`
+ --> src\client\ui\hud.rs:3:73
+  |
+3 | use crate::{client::client_world::ClientPlayerInfo, prelude::*, voxel::{Chu
+nkSystem, ClientChunkSystem, VoxShape, VoxelBrush}};
+  |                                                                         ^^^
+^^^^^^^^  ^^^^^^^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused imports: `new_egui_window` and `settings::ui_setting_line`
+  --> src\client\ui\hud.rs:17:13
+   |
+17 | use super::{new_egui_window, settings::ui_setting_line};
+   |             ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `EguiGlobalSettings`, `EguiMultipassSchedule`, `Primar
+yEguiContext`, `Rounding`, `Stroke`, and `style::HandleShape`
+  --> src\client\ui\mod.rs:30:11
+   |
+30 | ...f, style::HandleShape, Align2, Color32, FontData, FontDefinitions, Font
+Family, Layout, Pos2, Response, Rounding, Stroke, Ui, WidgetText,
+   |       ^^^^^^^^^^^^^^^^^^                                                  
+                                ^^^^^^^^  ^^^^^^
+31 | ...ContextSettings, EguiContexts, EguiGlobalSettings, EguiMultipassSchedul
+e, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, PrimaryEguiContext};
+   |                                   ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^
+^                                                      ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rand::Rng`
+  --> src\client\ui\mod.rs:33:5
+   |
+33 | use rand::Rng;
+   |     ^^^^^^^^^
+
+warning: unused import: `bevy::post_process::bloom::Bloom`
+ --> src\client\client_world.rs:3:5
+  |
+3 | use bevy::post_process::bloom::Bloom;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `bevy::anti_alias::fxaa::Fxaa`
+ --> src\client\client_world.rs:4:5
+  |
+4 | use bevy::anti_alias::fxaa::Fxaa;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `bevy::core_pipeline::tonemapping::Tonemapping`
+ --> src\client\client_world.rs:5:5
+  |
+5 | use bevy::core_pipeline::tonemapping::Tonemapping;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `bevy::core_pipeline::Skybox`
+ --> src\client\client_world.rs:6:5
+  |
+6 | use bevy::core_pipeline::Skybox;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ScreenSpaceReflections`
+ --> src\client\client_world.rs:7:17
+  |
+7 | use bevy::pbr::{ScreenSpaceReflections};
+  |                 ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `VolumetricFog`
+ --> src\client\client_world.rs:8:19
+  |
+8 | use bevy::light::{VolumetricFog, VolumetricLight};
+  |                   ^^^^^^^^^^^^^
+
+warning: unused import: `crate::prelude::*`
+  --> src\client\input.rs:11:5
+   |
+11 | use crate::prelude::*;
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `bevy::prelude::*`
+ --> src\client\editor\mod.rs:1:5
+  |
+1 | use bevy::prelude::*;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `platform::collections::HashMap`
+ --> src\net\netproc_client.rs:3:53
+  |
+3 | use bevy::{ecs::system::EntityCommands, prelude::*, platform::collections::
+HashMap};
+  |                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^
+
+warning: unused imports: `AsMutRef`, `ChunkSystem`, `ServerChunkSystem`, and `p
+acket::CellData`
+  --> src\net\netproc_server.rs:11:11
+   |
+11 |     net::{packet::CellData, CPacket, EntityId, RenetServerHelper, SPacket,
+ PROTOCOL_ID},
+   |           ^^^^^^^^^^^^^^^^
+12 |     server::prelude::*,
+13 |     util::{current_timestamp_millis, AsMutRef},
+   |                                      ^^^^^^^^
+14 |     voxel::{ChunkSystem, ServerChunkSystem},
+   |             ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `MaterialExtension`
+ --> src\voxel\voxel_client.rs:2:51
+  |
+2 |     color::palettes::css, pbr::{ExtendedMaterial, MaterialExtension}, prelu
+de::*, render::{
+  |                                                   ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::client::prelude::*`
+ --> src\voxel\render.rs:4:5
+  |
+4 | use crate::client::prelude::*;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+   --> src\client\character_controller.rs:149:30
+    |
+149 |     mut mouse_motion_events: EventReader<MouseMotion>,
+    |                              ^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+   --> src\client\character_controller.rs:150:29
+    |
+150 |     mut mouse_wheel_events: EventReader<MouseWheel>,
+    |                             ^^^^^^^^^^^
+
+warning: use of deprecated type alias `avian3d::schedule::PhysicsSet`: Renamed 
+to `PhysicsSystems`
+  --> src\client\character_controller.rs:21:56
+   |
+21 |         app.add_systems(PostUpdate, sync_camera.in_set(PhysicsSet::Writeba
+ck));
+   |                                                        ^^^^^^^^^^
+
+warning: use of deprecated type alias `avian3d::schedule::PhysicsSet`: Renamed 
+to `PhysicsSystems`
+  --> src\client\game_client.rs:86:65
+   |
+86 |             app.add_systems(PostUpdate, debug_draw_gizmo.in_set(PhysicsSet
+::Writeback).run_if(condition::in_world));
+   |                                                                 ^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy_egui::egui::Rounding`: Renamed to C
+ornerRadius
+  --> src\client\ui\mod.rs:30:111
+   |
+30 |     self, style::HandleShape, Align2, Color32, FontData, FontDefinitions, 
+FontFamily, Layout, Pos2, Response, Rounding, Stroke, Ui, Widge...
+   |                                                                           
+                                    ^^^^^^^^
+
+warning: use of deprecated struct `bevy_egui::egui::SelectableLabel`: Use `Butt
+on::selectable()` instead
+   --> src\client\ui\mod.rs:573:33
+    |
+573 |         sfx_play(self.add(egui::SelectableLabel::new(false, text)))
+    |                                 ^^^^^^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventWriter`: Renamed to 
+`MessageWriter`.
+  --> src\client\ui\debug.rs:31:26
+   |
+31 |     mut app_exit_events: EventWriter<AppExit>,
+   |                          ^^^^^^^^^^^
+
+warning: use of deprecated function `bevy_egui::egui::menu::bar`: Use `egui::Me
+nuBar::new().ui(` instead
+  --> src\client\ui\debug.rs:56:25
+   |
+56 |             egui::menu::bar(ui, |ui| {
+   |                         ^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventWriter`: Renamed to 
+`MessageWriter`.
+  --> src\client\ui\main_menu.rs:30:26
+   |
+30 |     mut app_exit_events: EventWriter<AppExit>,
+   |                          ^^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+   --> src\client\input.rs:200:29
+    |
+200 |     mut mouse_wheel_events: EventReader<bevy::input::mouse::MouseWheel>,
+    |                             ^^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+  --> src\client\settings.rs:34:33
+   |
+34 | fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<
+ClientSettings>) {
+   |                                 ^^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+  --> src\server\dedicated_server.rs:59:29
+   |
+59 | fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<Serv
+erSettings>) {
+   |                             ^^^^^^^^^^^
+
+warning: use of deprecated function `rand::thread_rng`: Renamed to `rng`
+  --> src\server\integrated_server.rs:13:32
+   |
+13 |             port: 6000 + rand::thread_rng().gen_range(0..6000),
+   |                                ^^^^^^^^^^
+
+warning: use of deprecated type alias `bevy::prelude::EventReader`: Renamed to 
+`MessageReader`.
+  --> src\net\netproc_server.rs:51:24
+   |
+51 |     mut server_events: EventReader<ServerEvent>,
+   |                        ^^^^^^^^^^^
+
+warning: use of deprecated function `rand::thread_rng`: Renamed to `rng`
+   --> src\util\mod.rs:208:25
+    |
+208 |     let mut rng = rand::thread_rng();
+    |                         ^^^^^^^^^^
+
+warning: use of deprecated function `rand::thread_rng`: Renamed to `rng`
+  --> src\util\wfc.rs:87:37
+   |
+87 |         let tmp = self.possib[rand::thread_rng().gen_range(0..self.possib.
+len())];
+   |                                     ^^^^^^^^^^
+
+warning: use of deprecated type alias `avian3d::schedule::PhysicsSet`: Renamed 
+to `PhysicsSystems`
+  --> src\voxel\voxel_client.rs:65:44
+   |
+65 |                 draw_crosshair_cube.in_set(PhysicsSet::Writeback),
+   |                                            ^^^^^^^^^^
+
+warning: use of deprecated method `bevy_egui::egui::style::WidgetVisuals::round
+ing`: Renamed to corner_radius
+   --> src\client\ui\hud.rs:245:68
+    |
+245 |                 let rounding = ui.style().visuals.widgets.inactive.roundi
+ng();
+    |                                                                    ^^^^^^
+^^
+
+warning: use of deprecated associated function `bevy_egui::egui::ComboBox::from
+_id_source`: Renamed from_id_salt
+   --> src\client\ui\serverlist.rs:410:25
+    |
+410 |         egui::ComboBox::from_id_source("Difficulty")
+    |                         ^^^^^^^^^^^^^^
+
+warning: use of deprecated associated function `bevy_egui::egui::SelectableLabe
+l::new`: Use `Button::selectable()` instead
+   --> src\client\ui\mod.rs:573:50
+    |
+573 |         sfx_play(self.add(egui::SelectableLabel::new(false, text)))
+    |                                                  ^^^
+
+warning: use of deprecated method `rand::Rng::gen_range`: Renamed to `random_ra
+nge`
+  --> src\server\integrated_server.rs:13:45
+   |
+13 |             port: 6000 + rand::thread_rng().gen_range(0..6000),
+   |                                             ^^^^^^^^^
+
+warning: use of deprecated method `rand::Rng::gen_range`: Renamed to `random_ra
+nge`
+  --> src\util\wfc.rs:87:50
+   |
+87 |         let tmp = self.possib[rand::thread_rng().gen_range(0..self.possib.
+len())];
+   |                                                  ^^^^^^^^^
+
+warning: use of deprecated method `rand::Rng::gen_range`: Renamed to `random_ra
+nge`
+   --> src\util\mod.rs:211:18
+    |
+211 |         ADJS[rng.gen_range(0..ADJS.len())],
+    |                  ^^^^^^^^^
+
+warning: use of deprecated method `rand::Rng::gen_range`: Renamed to `random_ra
+nge`
+   --> src\util\mod.rs:212:19
+    |
+212 |         NOUNS[rng.gen_range(0..NOUNS.len())],
+    |                   ^^^^^^^^^
+
+warning: use of deprecated method `rand::Rng::gen_range`: Renamed to `random_ra
+nge`
+   --> src\util\mod.rs:213:13
+    |
+213 |         rng.gen_range(5..9999)
+    |             ^^^^^^^^^
+
+warning: unused variable: `rotation`
+   --> src\client\character_controller.rs:176:67
+    |
+176 |     for (mut trans, mut ctl, mut linvel, mut gravity_scale, hits, rotatio
+n) in query.iter_mut() {
+    |                                                                   ^^^^^^^
+^ help: if this is intentional, prefix it with an underscore: `_rotation`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by defau
+lt
+
+warning: unused variable: `cli`
+   --> src\client\character_controller.rs:411:5
+    |
+411 |     cli: Res<ClientInfo>,
+    |     ^^^ help: if this is intentional, prefix it with an underscore: `_cli
+`
+
+warning: unused variable: `net_transport`
+  --> src\client\ui\debug.rs:70:33
+   |
+70 |                     if let Some(net_transport) = net_transport {
+   |                                 ^^^^^^^^^^^^^ help: if this is intentional
+, prefix it with an underscore: `_net_transport`
+
+warning: variable does not need to be mutable
+   --> src\client\ui\hud.rs:206:5
+    |
+206 |     mut voxbrush: ResMut<VoxelBrush>,
+    |     ----^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `voxbrush`
+   --> src\client\ui\hud.rs:206:5
+    |
+206 |     mut voxbrush: ResMut<VoxelBrush>,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an undersco
+re: `_voxbrush`
+
+warning: variable does not need to be mutable
+   --> src\client\ui\mod.rs:426:5
+    |
+426 |     mut ui_state: ResMut<UiState>,
+    |     ----^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src\client\ui\mod.rs:428:5
+    |
+428 |     mut contexts: EguiContexts,
+    |     ----^^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `ui_state`
+   --> src\client\ui\mod.rs:426:5
+    |
+426 |     mut ui_state: ResMut<UiState>,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an undersco
+re: `_ui_state`
+
+warning: unused variable: `contexts`
+   --> src\client\ui\mod.rs:428:5
+    |
+428 |     mut contexts: EguiContexts,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an undersco
+re: `_contexts`
+
+warning: variable does not need to be mutable
+   --> src\client\ui\mod.rs:436:65
+    |
+436 | fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo
+_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+    |                                                                 ----^^^^^
+^^^^^^^
+    |                                                                 |
+    |                                                                 help: rem
+ove this `mut`
+
+warning: unused variable: `limbo_played`
+   --> src\client\ui\mod.rs:436:65
+    |
+436 | fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo
+_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+    |                                                                 ^^^^^^^^^
+^^^^^^^ help: if this is intentional, prefix it with an underscore: `_limbo_pla
+yed`
+
+warning: unused variable: `asset_server`
+   --> src\client\client_world.rs:116:5
+    |
+116 |     asset_server: Res<AssetServer>,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an undersco
+re: `_asset_server`
+
+warning: variable does not need to be mutable
+   --> src\client\client_world.rs:224:5
+    |
+224 |     mut cubemap: Option<ResMut<SkyboxCubemap>>,
+    |     ----^^^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: unused variable: `worldinfo`
+   --> src\client\input.rs:205:5
+    |
+205 |     worldinfo: Option<ResMut<WorldInfo>>,
+    |     ^^^^^^^^^ help: if this is intentional, prefix it with an underscore:
+ `_worldinfo`
+
+warning: variable does not need to be mutable
+  --> src\net\netproc_client.rs:37:5
+   |
+37 |     mut net_client: Option<ResMut<RenetClient>>,
+   |     ----^^^^^^^^^^
+   |     |
+   |     help: remove this `mut`
+
+warning: unused variable: `queue_del`
+  --> src\voxel\lighting.rs:53:98
+   |
+53 | fn try_spread_light(chunk: &ChunkPtr, lp: IVec3, lightlevel: u16, queue_ad
+d: &mut VoxLightQueue, queue_del: &mut VoxLightQueue) {
+   |                                                                           
+                       ^^^^^^^^^ help: if this is intentional, prefix it with a
+n underscore: `_queue_del`
+
+warning: unused variable: `touches`
+   --> src\voxel\voxel_client.rs:476:5
+    |
+476 |     touches: Res<Touches>,
+    |     ^^^^^^^ help: if this is intentional, prefix it with an underscore: `
+_touches`
+
+warning: variable does not need to be mutable
+   --> src\voxel\voxel_client.rs:821:5
+    |
+821 |     mut texts: Query<&mut Text>,
+    |     ----^^^^^
+    |     |
+    |     help: remove this `mut`
+
+warning: fields `id` and `light_emission` are never read
+   --> src\voxel\vox.rs:110:5
+    |
+109 | pub struct VoxTex {
+    |            ------ fields in this struct
+110 |     id: u16,
+    |     ^^
+111 |     light_emission: u8,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `asset_load_ui_system` is never used
+   --> src\voxel\voxel_client.rs:818:4
+    |
+818 | fn asset_load_ui_system(
+    |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src\client\ui\mod.rs:210:31
+    |
+210 | pub fn new_egui_window(title: &str) -> egui::Window {
+    |                               ^^^^     ^^^^^^^^^^^^ the same lifetime is 
+hidden here
+    |                               |
+    |                               the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the s
+ignature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+210 | pub fn new_egui_window(title: &str) -> egui::Window<'_> {
+    |                                                    ++++
+
+warning: `ethertia` (lib) generated 67 warnings (run `cargo fix --lib -p ethert
+ia` to apply 39 suggestions)
+warning: unused import: `ethertia::util::vtx::VertexBuffer`
+ --> src\main.rs:4:5
+  |
+4 | use ethertia::util::vtx::VertexBuffer;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ethertia` (bin "ethertia") generated 1 warning (run `cargo fix --bin 
+"ethertia"` to apply 1 suggestion)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 2.03s

@@ -16,7 +16,7 @@ use crate::{
 
 #[derive(Resource)]
 struct AssetDebug {
-    albedo: Handle<Image>,
+    albedo: Handle<Image>,//HANDLE是bevy的资源句柄类型，用于引用加载的资源。在这个代码中，albedo 是一个 Handle<Image> 类型的字段，表示一个图像资源的句柄。通过这个句柄，可以在 Bevy 的资源系统中访问和使用这个图像资源。Handle 是 Bevy 中用于管理和访问资源的一种方式，它提供了对资源的引用，而不需要直接持有资源的数据。这使得资源的管理更加高效和灵活。
     normal: Handle<Image>,
     dram: Handle<Image>,
     foliage_diff: Handle<Image>,
@@ -424,6 +424,10 @@ fn chunks_remesh_enqueue(
             *dst = mesh_liquid;
         }
 
+        // Ensure the chunk entity is visible now that meshes were uploaded
+        if let Ok(mut ent_cmds) = commands.get_entity(entity) {
+            ent_cmds.try_insert(Visibility::Visible);
+        }
         // Update Phys Collider TriMesh
         if let Some(collider) = collider {
             if let Ok(mut cmds) = commands.get_entity(entity) {
@@ -832,6 +836,7 @@ fn write_debug_file_system(
     chunk_sys: Option<Res<ClientChunkSystem>>,
     meshes: Option<Res<Assets<Mesh>>>,
     mtls_terrain: Option<Res<Assets<ExtendedMaterial<StandardMaterial, TerrainMaterial>>>>,
+    images: Option<Res<Assets<Image>>>,
     time: Res<Time>,
     mut last: Local<f32>,
 ) {
@@ -851,16 +856,24 @@ fn write_debug_file_system(
     s.push_str(&format!("Timestamp: {:?}\n", std::time::SystemTime::now()));
 
     let items = vec![
-        ("albedo", assets.albedo.id()),
-        ("normal", assets.normal.id()),
-        ("dram", assets.dram.id()),
-        ("foliage", assets.foliage_diff.id()),
-        ("water_norm", assets.water_normals.id()),
+        ("albedo", assets.albedo.clone()),
+        ("normal", assets.normal.clone()),
+        ("dram", assets.dram.clone()),
+        ("foliage", assets.foliage_diff.clone()),
+        ("water_norm", assets.water_normals.clone()),
     ];
     s.push_str("Asset States:\n");
-    for (name, handle_id) in items.iter() {
-        let st = asset_server.get_load_state(*handle_id);
+    for (name, handle) in items.iter() {
+        let handle_id = handle.id();
+        let st = asset_server.get_load_state(handle_id);
         s.push_str(&format!("  {}: {:?}\n", name, st));
+        if st == bevy::asset::LoadState::Loaded {
+            if let Some(imgs) = &images {
+                if let Some(img) = imgs.get(handle_id) {
+                    s.push_str(&format!("    size: {:?}, texture_format: {:?}\n", img.texture_descriptor.size, img.texture_descriptor.format));
+                }
+            }
+        }
     }
 
     if let Some(chunks) = chunk_sys {
