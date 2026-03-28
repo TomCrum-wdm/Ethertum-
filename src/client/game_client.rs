@@ -30,19 +30,15 @@ impl Plugin for ClientGamePlugin {
                 //app.insert_resource(AtmosphereModel::default());
             }
             
-            // Keep mobile startup conservative: deferred path is more fragile on Android GPUs/drivers.
-            #[cfg(not(target_os = "android"))]
+            // Voxel materials currently provide deferred shaders; forcing forward on Android
+            // bypasses those code paths and breaks terrain texture sampling.
+            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+
+            #[cfg(target_os = "android")]
             {
-                // for SSR
-                //app.insert_resource(Msaa::Off);
-                app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+                app.insert_resource(AmbientLight { brightness: 1.8, ..default() });
+                app.insert_resource(ClearColor(Color::srgb(0.06, 0.09, 0.12)));
             }
-        #[cfg(target_os = "android")]
-        {
-            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::forward());
-            app.insert_resource(AmbientLight { brightness: 1.8, ..default() });
-            app.insert_resource(ClearColor(Color::srgb(0.06, 0.09, 0.12)));
-        }
             
             // SSAO
             // app.add_plugins(TemporalAntiAliasPlugin);

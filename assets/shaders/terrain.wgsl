@@ -192,13 +192,11 @@ fn fragment(
 ) -> bevy_pbr::prepass_io::FragmentOutput { //@location(0) vec4<f32> {
     let worldpos  = in.world_position.xyz;
     let worldnorm = in.world_normal;
-    let mtls = round(in.mtls / in.bary) - vec3<f32>(1.0);
+    // Avoid 0/0 on triangle edges (bary can be 0.0), which creates NaN material ids
+    // and causes undefined texture sampling on some mobile GPUs.
+    let safe_bary = max(in.bary, vec3<f32>(1e-5));
+    let mtls = clamp(round(in.mtls / safe_bary) - vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(23.0));
     let bary = in.bary;
-
-    if mtls.x == -1.0 || mtls.y == -1.0 || mtls.z == -1.0 {
-        // return vec4<f32>(1.0, 0.0, 0.0, 1.0);
-        discard;
-    }
 
     // uv.v == -1: Triplanar Isosurface. otherwise: Custom UV
     // if mtls.x != -1.0 {

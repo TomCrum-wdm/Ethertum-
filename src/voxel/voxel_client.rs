@@ -867,7 +867,7 @@ fn write_debug_file_system(
         let handle_id = handle.id();
         let st = asset_server.get_load_state(handle_id);
         s.push_str(&format!("  {}: {:?}\n", name, st));
-        if st == bevy::asset::LoadState::Loaded {
+        if matches!(st, Some(bevy::asset::LoadState::Loaded)) {
             if let Some(imgs) = &images {
                 if let Some(img) = imgs.get(handle_id) {
                     s.push_str(&format!("    size: {:?}, texture_format: {:?}\n", img.texture_descriptor.size, img.texture_descriptor.format));
