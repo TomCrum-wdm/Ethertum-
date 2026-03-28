@@ -533,13 +533,29 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
             FontData::from_static(include_bytes!("../../../assets/fonts/menlo.ttf")),
         ),
     );
-    // 新增：中文字体
-    fonts.font_data.insert(
-        "noto_sans_sc".to_owned(),
-        std::sync::Arc::new(
-            FontData::from_static(include_bytes!("../../../assets/fonts/NotoSansSC-Regular.otf")),
-        ),
-    );
+
+    // 安卓端优先动态加载系统字体
+    #[cfg(target_os = "android")]
+    let sys_font_bytes = match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
+        Ok(bytes) => {
+            log::info!("[UI] Android系统字体加载成功: /system/fonts/DroidSansFallback.ttf, 大小: {} 字节", bytes.len());
+            Some(bytes)
+        },
+        Err(e) => {
+            log::warn!("[UI] Android系统字体加载失败: {}", e);
+            None
+        }
+    };
+
+    #[cfg(not(target_os = "android"))]
+    let sys_font_bytes: Option<Vec<u8>> = None;
+
+    if let Some(bytes) = sys_font_bytes {
+        fonts.font_data.insert(
+            "noto_sans_sc".to_owned(),
+            std::sync::Arc::new(FontData::from_owned(bytes)),
+        );
+    }
 
     // Put my font first (highest priority):
     fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());

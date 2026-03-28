@@ -36,12 +36,18 @@ pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
                 let (val, mut tex) = match terrain_mode {
                     TerrainMode::Planet => {
                         let d = (p.as_vec3() - planet_center.as_vec3()).length();
-                        let arr2 = (p.as_vec3() / 130.0).xz().to_array().map(|v| v as f64);
-                        let arr3 = (p.as_vec3() / 90.0).to_array().map(|v| v as f64);
+                        // clamp采样参数，防止极大坐标导致NaN/inf
+                        let safe_vec3 = p.as_vec3().clamp(
+                            Vec3::splat(-100_000.0),
+                            Vec3::splat(100_000.0),
+                        );
+                        let arr2 = (safe_vec3 / 130.0).xz().to_array().map(|v| v as f64);
+                        let arr3 = (safe_vec3 / 90.0).to_array().map(|v| v as f64);
                         let f_terr = fbm.get(arr2) as f32;
                         let f_3d = fbm.get(arr3) as f32;
-                        // 减小3D噪声影响，壳层更厚
                         let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 1.2;
+                        // 检查val非法
+                        if !val.is_finite() { val = -1.0; }
                         let mut tex = VoxTex::Nil;
                         if val > 0.0 {
                             tex = VoxTex::Stone;
