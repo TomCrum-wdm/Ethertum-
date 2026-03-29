@@ -559,13 +559,16 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
 
     // Put my font first (highest priority):
     fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());
-    // 中文字体作为Proportional的fallback
-    fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    // 仅在系统字体实际加载成功时注册 fallback，避免安卓端因字体缺失导致启动卡死
+    if fonts.font_data.contains_key("noto_sans_sc") {
+        fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    }
 
     // Put my font as last fallback for monospace:
     fonts.families.get_mut(&FontFamily::Monospace).ok_or(crate::err_opt_is_none!())?.push("my_font".to_owned());
-    // 中文字体作为Monospace的fallback
-    fonts.families.get_mut(&FontFamily::Monospace).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    if fonts.font_data.contains_key("noto_sans_sc") {
+        fonts.families.get_mut(&FontFamily::Monospace).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    }
 
     contexts.ctx_mut()?.set_fonts(fonts);
     Ok(())
