@@ -530,13 +530,13 @@ fn raycast(
     query_cam: Query<&GlobalTransform, With<CharacterControllerCamera>>, // ray
     query_player: Query<Entity, With<CharacterController>>,              // exclude collider
     mut hit_result: ResMut<HitResult>,
-    _touches: Res<Touches>,
-    _touch_buttons: Res<TouchButtonState>,
+    touches: Res<Touches>,
+    touch_buttons: Res<TouchButtonState>,
 
     query_input: Query<&ActionState<InputAction>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
     cli: Res<ClientInfo>,
-    _cfg: Res<ClientSettings>,
+    cfg: Res<ClientSettings>,
     vox_brush: Res<VoxelBrush>,
 ) {
     let Ok(cam_trans) = query_cam.single() else {
