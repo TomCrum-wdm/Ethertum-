@@ -122,10 +122,25 @@ use std::path::PathBuf;
 pub fn saves_root() -> PathBuf {
     #[cfg(target_os = "android")]
     {
-        // On Android prefer $HOME (app-specific data dir) if present, otherwise fallback to current dir.
+        // On Android prefer $HOME (app-specific data dir) if present.
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home).join("saves");
         }
+
+        // Fallback to common app-private locations. Try both variants used on different Android setups.
+        // Prefer `/data/data/<pkg>/files/saves` then `/data/user/0/<pkg>/files/saves`.
+        // Package id default is `com.ethertia.client`; allow override via env `ETHERTIA_ANDROID_PACKAGE`.
+        let pkg = std::env::var("ETHERTIA_ANDROID_PACKAGE").unwrap_or_else(|_| "com.ethertia.client".to_string());
+        let candidate1 = PathBuf::from(format!("/data/data/{}/files/saves", pkg));
+        if candidate1.exists() {
+            return candidate1;
+        }
+        let candidate2 = PathBuf::from(format!("/data/user/0/{}/files/saves", pkg));
+        if candidate2.exists() {
+            return candidate2;
+        }
+
+        // As a last resort, fall back to current dir to keep behavior predictable on emulators.
         return std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("saves");
     }
 
