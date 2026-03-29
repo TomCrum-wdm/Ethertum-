@@ -328,7 +328,7 @@ pub fn export_world_save(world_name: Option<&str>, seed: u64) -> Option<std::pat
         return None;
     }
 
-    let exports_dir = Path::new("exports");
+    let exports_dir = crate::util::saves_root().join("exports");
     if let Err(err) = fs::create_dir_all(&exports_dir) {
         warn!("Failed to create exports dir {:?}: {}", exports_dir, err);
         return None;

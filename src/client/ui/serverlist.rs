@@ -276,6 +276,8 @@ pub fn ui_localsaves(
     mut tx_gen_name: Local<String>,
     mut tx_gen_seed: Local<String>,
     serv_cfg: Option<Res<ServerSettings>>,
+    mut saves_cache: Local<Option<Vec<(String, Option<serde_json::Value>)>>>,
+    mut saves_loading_task: Local<Option<Task<Vec<(String, Option<serde_json::Value>)>>>>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -290,24 +292,46 @@ pub fn ui_localsaves(
             ui.add_space(8.0);
         }
 
-        // Gather saves from disk
+        // Gather saves from disk — do this in background to avoid blocking UI/startup.
         let saves_root = crate::util::saves_root();
-        let mut saves: Vec<(String, Option<serde_json::Value>)> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&saves_root) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    let folder = e.file_name().to_string_lossy().into_owned();
-                    let meta_path = p.join("meta.json");
-                    let meta = meta_path
-                        .exists()
-                        .then(|| std::fs::read_to_string(&meta_path).ok())
-                        .flatten()
-                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-                    saves.push((folder, meta));
-                }
+        // If we have a cached result, use it. Otherwise ensure a background task is running.
+        if saves_cache.is_none() {
+            if saves_loading_task.is_none() {
+                let root = saves_root.clone();
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    let mut list: Vec<(String, Option<serde_json::Value>)> = Vec::new();
+                    if let Ok(entries) = std::fs::read_dir(&root) {
+                        for e in entries.flatten() {
+                            let p = e.path();
+                            if p.is_dir() {
+                                let folder = e.file_name().to_string_lossy().into_owned();
+                                let meta_path = p.join("meta.json");
+                                let meta = meta_path
+                                    .exists()
+                                    .then(|| std::fs::read_to_string(&meta_path).ok())
+                                    .flatten()
+                                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+                                list.push((folder, meta));
+                            }
+                        }
+                    }
+                    list
+                });
+                *saves_loading_task = Some(task);
             }
         }
+
+        // If loading task finished, collect result into cache
+        if let Some(task) = saves_loading_task.as_mut() {
+            if task.is_finished() {
+                if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
+                    *saves_cache = Some(polled);
+                }
+                *saves_loading_task = None;
+            }
+        }
+
+        let mut saves: Vec<(String, Option<serde_json::Value>)> = saves_cache.clone().unwrap_or_default();
 
         // Prepare deferred actions to avoid multiple mutable borrows of `cli` inside closures
         let create_requested = std::cell::Cell::new(false);

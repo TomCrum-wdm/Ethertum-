@@ -5,7 +5,7 @@ mod main_menu;
 pub mod serverlist;
 mod settings;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub mod prelude {
     pub use super::items::{ui_inventory, ui_item_stack};
@@ -35,6 +35,77 @@ use crate::client::prelude::*;
 
 pub struct UiPlugin;
 
+// Resource that holds system font bytes loaded in background (Arc+Mutex for thread passback)
+#[derive(Resource)]
+struct SysFontBytes(Arc<Mutex<Option<Vec<u8>>>>);
+
+impl Default for SysFontBytes {
+    fn default() -> Self {
+        SysFontBytes(Arc::new(Mutex::new(None)))
+    }
+}
+
+// Spawn a background thread at startup to load Android system fallback font if present.
+fn spawn_sys_font_loader(sys_font: Res<SysFontBytes>) {
+    if cfg!(target_os = "android") {
+        let arc = sys_font.0.clone();
+        std::thread::spawn(move || {
+            match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
+                Ok(bytes) => {
+                    log::info!("[UI] Android系统字体后台加载成功, 大小: {} 字节", bytes.len());
+                    if let Ok(mut lock) = arc.lock() {
+                        *lock = Some(bytes);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("[UI] Android系统字体后台加载失败: {}", e);
+                }
+            }
+        });
+    }
+}
+
+// Apply loaded system font when available by merging and calling set_fonts on the Egui context.
+fn apply_sys_font_system(sys_font: Res<SysFontBytes>, mut contexts: EguiContexts) {
+    let maybe_bytes = {
+        let lock = sys_font.0.lock().unwrap();
+        lock.clone()
+    };
+    if let Some(bytes) = maybe_bytes {
+        // Rebuild FontDefinitions similar to initial setup but include the loaded noto fallback.
+        let mut fonts = FontDefinitions::default();
+        fonts.font_data.insert(
+            "my_font".to_owned(),
+            Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/menlo.ttf"))),
+        );
+        fonts.font_data.insert("noto_sans_sc".to_owned(), Arc::new(FontData::from_owned(bytes)));
+
+        if let Some(fam) = fonts.families.get_mut(&FontFamily::Proportional) {
+            fam.insert(0, "my_font".to_owned());
+            fam.push("noto_sans_sc".to_owned());
+        }
+        if let Some(fam) = fonts.families.get_mut(&FontFamily::Monospace) {
+            fam.push("my_font".to_owned());
+            fam.push("noto_sans_sc".to_owned());
+        }
+
+        match contexts.ctx_mut() {
+            Ok(mut ctx) => {
+                ctx.set_fonts(fonts);
+                log::info!("[UI] 已应用后台加载的系统字体作为回退字体");
+            }
+            Err(e) => {
+                log::warn!("[UI] apply_sys_font_system: set_fonts 失败: {:?}", e);
+            }
+        }
+
+        // Clear stored bytes so we don't reapply repeatedly
+        if let Ok(mut lock) = sys_font.0.lock() {
+            *lock = None;
+        }
+    }
+}
+
 #[derive(Default, Resource)]
 struct UiState {
     is_window_open: bool,
@@ -43,6 +114,7 @@ struct UiState {
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>();
+        app.init_resource::<SysFontBytes>();
         app.init_resource::<items::InventoryUiState>();
         app.insert_resource(hud::ChatHistory::default());
         if !app.is_plugin_added::<EguiPlugin>() {
@@ -57,9 +129,10 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Startup,
-                (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system),
+                (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system, spawn_sys_font_loader),
             )
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
+            .add_systems(Update, apply_sys_font_system)
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
             .add_systems(Update, sync_camera_render_effects_system)
             .add_systems(Update, items::flush_inventory_ui_ops.run_if(condition::in_world))
@@ -489,6 +562,7 @@ fn sync_camera_render_effects_system(
 }
 
 fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
+    
     /*
     contexts.ctx_mut()?.style_mut(|style| {
         let visuals = &mut style.visuals;
@@ -537,28 +611,7 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
         ),
     );
 
-    // 安卓端优先动态加载系统字体
-    #[cfg(target_os = "android")]
-    let sys_font_bytes = match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
-        Ok(bytes) => {
-            log::info!("[UI] Android系统字体加载成功: /system/fonts/DroidSansFallback.ttf, 大小: {} 字节", bytes.len());
-            Some(bytes)
-        },
-        Err(e) => {
-            log::warn!("[UI] Android系统字体加载失败: {}", e);
-            None
-        }
-    };
-
-    #[cfg(not(target_os = "android"))]
-    let sys_font_bytes: Option<Vec<u8>> = None;
-
-    if let Some(bytes) = sys_font_bytes {
-        fonts.font_data.insert(
-            "noto_sans_sc".to_owned(),
-            std::sync::Arc::new(FontData::from_owned(bytes)),
-        );
-    }
+    // 系统字体改为后台异步加载（参见 spawn_sys_font_loader / apply_sys_font_system）
 
     // Put my font first (highest priority):
     fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());
