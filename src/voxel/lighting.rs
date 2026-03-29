@@ -7,6 +7,7 @@ pub type VoxLightQueue = Vec<(ChunkPtr, u16, VoxLight)>;
 
 
 pub fn compute_skylight(chunk: &ChunkPtr, queue_add: &mut VoxLightQueue) {
+    let mut guard = crate::util::lock_arc(chunk);
 
     for lx in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
@@ -14,15 +15,14 @@ pub fn compute_skylight(chunk: &ChunkPtr, queue_add: &mut VoxLightQueue) {
 
             for ly in (0..Chunk::LEN).rev() {
                 let lp = ivec3(lx, ly, lz);
-                
-                let v = chunk.at_voxel_mut(lp);
+
+                let v = guard.at_voxel_mut(lp);
                 if !v.is_nil() {
                     lightlevel = 0;
                 }
                 v.light.set_red(lightlevel);
 
                 if lightlevel != 0 {
-                    
                     queue_add.push((chunk.clone(), Chunk::local_idx(lp) as u16, v.light));
                 }
             }
@@ -31,7 +31,8 @@ pub fn compute_skylight(chunk: &ChunkPtr, queue_add: &mut VoxLightQueue) {
 }
 
 pub fn collect_chunk_lights(chunk: &ChunkPtr, queue_add: &mut VoxLightQueue) {
-    chunk.for_voxel_lights(|v, local_idx| {
+    let guard = crate::util::lock_arc(chunk);
+    guard.for_voxel_lights(|v, local_idx| {
         queue_add.push((chunk.clone(), local_idx as u16, v.light));
     });
 }
@@ -50,23 +51,26 @@ pub fn compute_voxel_light(queue_add: &mut VoxLightQueue, queue_del: &mut VoxLig
 
 }
 
-fn try_spread_light(chunk: &ChunkPtr, lp: IVec3, lightlevel: u16, queue_add: &mut VoxLightQueue, queue_del: &mut VoxLightQueue) {
-    let chunk = if Chunk::is_localpos(lp) {
+fn try_spread_light(chunk: &ChunkPtr, lp: IVec3, lightlevel: u16, queue_add: &mut VoxLightQueue, _queue_del: &mut VoxLightQueue) {
+    let real_chunkptr = if Chunk::is_localpos(lp) {
         chunk.clone()
     } else {
-        let Some(neib) = chunk.get_chunk_rel(lp) else {
-            return;
-        };
-        neib
+        let guard = crate::util::lock_arc(chunk);
+        match guard.get_chunk_rel(lp) {
+            Some(neib) => neib,
+            None => return,
+        }
     };
+
     let lp = Chunk::as_localpos(lp);
 
-    let vox = chunk.at_voxel_mut(lp);
-    
-    if  lightlevel > 0 && vox.light.red() < lightlevel-1 && !vox.is_obaque_cube() {
-        vox.light.set_red(lightlevel-1);
+    let mut guard = crate::util::lock_arc(&real_chunkptr);
+    let vox = guard.at_voxel_mut(lp);
 
-        queue_add.push((chunk.clone(), Chunk::local_idx(lp) as u16, vox.light));
+    if lightlevel > 0 && vox.light.red() < lightlevel - 1 && !vox.is_obaque_cube() {
+        vox.light.set_red(lightlevel - 1);
+
+        queue_add.push((real_chunkptr.clone(), Chunk::local_idx(lp) as u16, vox.light));
     }
 
     // if removal

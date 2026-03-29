@@ -69,7 +69,7 @@ bevy = { version = "0.17.2", default-features = false, features = [
 ethertia = { path = "../..", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
-bevy = { version = "0.17", default-features = false, features = [
+bevy = { version = "0.17.2", default-features = false, features = [
     "android-native-activity",
     "android_shared_stdcxx",
     "animation",

@@ -8,7 +8,6 @@ use leafwing_input_manager::plugin::InputManagerPlugin;
 
 use crate::client::prelude::*;
 use crate::client::ui::*;
-use crate::prelude::*;
 
 #[derive(Resource, Debug, Clone)]
 pub struct TouchStickState {
@@ -235,12 +234,12 @@ pub fn input_handle(
     key: Res<ButtonInput<KeyCode>>,
     query_input: Query<&ActionState<InputAction>>,
 
-    mut mouse_wheel_events: EventReader<bevy::input::mouse::MouseWheel>,
+    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
     mut query_window: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut query_cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut query_controller: Query<&mut CharacterController>,
 
-    worldinfo: Option<ResMut<WorldInfo>>,
+    _worldinfo: Option<ResMut<WorldInfo>>,
     player: Option<ResMut<ClientPlayerInfo>>,
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,

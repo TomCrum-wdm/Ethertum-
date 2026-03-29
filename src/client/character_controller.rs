@@ -5,7 +5,7 @@ use crate::util::SmoothValue;
 
 use bevy::{
     input::mouse::{MouseMotion, MouseWheel},
-    prelude::*, transform::TransformSystems,
+    prelude::*,
 };
 use avian3d::prelude::*;
 use leafwing_input_manager::action_state::ActionState;
@@ -146,8 +146,8 @@ struct InputTimingState {
 fn input_move(
     input_key: Res<ButtonInput<KeyCode>>,
     input_mouse_button: Res<ButtonInput<MouseButton>>,
-    mut mouse_motion_events: EventReader<MouseMotion>,
-    mut mouse_wheel_events: EventReader<MouseWheel>,
+    mut mouse_motion_events: MessageReader<MouseMotion>,
+    mut mouse_wheel_events: MessageReader<MouseWheel>,
     touches: Res<Touches>,
     cfg: Res<ClientSettings>,
     touch_sticks: Res<TouchStickState>,
@@ -163,6 +163,7 @@ fn input_move(
         &ShapeHits,
         &Rotation,
     )>,
+    worldinfo: Option<Res<WorldInfo>>,
     mut cam_dist_smoothed: Local<SmoothValue>,
     mut input_timing: Local<InputTimingState>,
 ) {
@@ -174,7 +175,7 @@ fn input_move(
         return;
     };
 
-    for (mut trans, mut ctl, mut linvel, mut gravity_scale, hits, rotation) in query.iter_mut() {
+    for (mut trans, mut ctl, mut linvel, mut gravity_scale, hits, _rotation) in query.iter_mut() {
         // A Local-Space Movement.  Speed/Acceleration/Delta will applied later on this.
         let mut movement = Vec3::ZERO;
 
@@ -302,17 +303,18 @@ fn input_move(
             let is_jump_just_pressed = action_state.just_pressed(&InputAction::Jump) || touch_jump_just_pressed;
             let is_jump_hold = action_state.pressed(&InputAction::Jump) || touch_jump_pressed;
 
-            // Is Grouned
-            // The character is grounded if the shape caster has a hit with a normal that isn't too steep.
-            ctl.is_grounded = hits.iter().any(|hit| {
-                // if ctl.max_slope_angle == 0. {
-                //     true
-                // } else {
-                // rotation.rotate(-hit.normal2).angle_between(Vec3::Y).abs() <= ctl.max_slope_angle
-                // WTF is this mean?
-                (-hit.normal2).angle_between(Vec3::Y).abs() <= ctl.max_slope_angle
-                // }
-            });
+            // Is Grounded (use local up for planet mode)
+            let up = if let Some(w) = &worldinfo {
+                if w.terrain_mode == crate::client::settings::TerrainMode::Planet {
+                    (trans.translation - w.planet_center).normalize()
+                } else {
+                    Vec3::Y
+                }
+            } else {
+                Vec3::Y
+            };
+
+            ctl.is_grounded = hits.iter().any(|hit| (-hit.normal2).angle_between(up).abs() <= ctl.max_slope_angle);
 
             // Fly Move
             if ctl.is_flying {
@@ -366,10 +368,15 @@ fn input_move(
                 // info!("JMP {:?}", linvel.0);
             }
 
-            // Apply Yaw to Movement & Rotation
+            // Apply Yaw to Movement & Rotation using local up
             {
-                movement = Mat3::from_rotation_y(ctl.yaw) * movement;
-                trans.rotation = Quat::from_rotation_y(ctl.yaw);
+                let yaw_q = Quat::from_axis_angle(up, ctl.yaw);
+                let forward_ws = (yaw_q * -Vec3::Z).project_onto(up).normalize_or_zero();
+                let right_ws = forward_ws.cross(up).normalize_or_zero();
+
+                let movement_ws = movement.x * right_ws + movement.z * forward_ws + movement.y * up;
+                movement = movement_ws;
+                trans.rotation = yaw_q;
             }
         }
 
@@ -385,14 +392,13 @@ fn input_move(
             if ctl.is_sneaking {
                 // !Minecraft [Sneak] * 0.3
                 acceleration *= 0.3;
-            } // else if using item: // Minecraft [UsingItem] * 0.2
+            }
 
             if !ctl.is_grounded {
                 acceleration *= 0.2; // LessMove on air MC-Like 0.2
             }
 
-            linvel.x += movement.x * acceleration * dt_sec;
-            linvel.z += movement.z * acceleration * dt_sec;
+            linvel.0 += movement * acceleration * dt_sec;
         }
 
         // Damping
@@ -424,16 +430,31 @@ fn sync_camera(
     time: Res<Time>,
 
     input_key: Res<ButtonInput<KeyCode>>,
-    cli: Res<ClientInfo>,
+    _cli: Res<ClientInfo>,
     cfg: Res<ClientSettings>,
+    worldinfo: Option<Res<crate::client::client_world::WorldInfo>>,
 ) {
     if let Ok((char_pos, ctl)) = query_char.single() {
         if let Ok((mut cam_trans, mut proj)) = query_cam.single_mut() {
-            // // stop rotate Tracker when hold alt. thus can free view the Tracker.
-            // if !input_key.pressed(KeyCode::AltLeft) {
-            cam_trans.rotation = Quat::from_euler(EulerRot::YXZ, ctl.yaw, ctl.pitch, 0.0);
-            // }
-            cam_trans.translation = char_pos.0 + Vec3::new(0., 0.8, 0.) + cam_trans.forward() * -ctl.cam_distance;
+            // compute local up (planet radial) or default Y
+            let up = if let Some(w) = &worldinfo {
+                if w.terrain_mode == crate::client::settings::TerrainMode::Planet {
+                    (char_pos.0 - w.planet_center).normalize()
+                } else {
+                    Vec3::Y
+                }
+            } else {
+                Vec3::Y
+            };
+
+            // build rotation: yaw around up, pitch around right (tangent)
+            let yaw_q = Quat::from_axis_angle(up, ctl.yaw);
+            let forward_ws = (yaw_q * -Vec3::Z).project_onto(up).normalize_or_zero();
+            let right_ws = forward_ws.cross(up).normalize_or_zero();
+            let pitch_q = Quat::from_axis_angle(right_ws, ctl.pitch);
+            cam_trans.rotation = pitch_q * yaw_q;
+
+            cam_trans.translation = char_pos.0 + up * 0.8 + cam_trans.forward() * -ctl.cam_distance;
 
             // Smoothed FOV on sprinting
             fov_val.target = if input_key.pressed(KeyCode::KeyC) {

@@ -23,6 +23,7 @@ pub fn ui_connecting_server(mut ctx: EguiContexts, mut cli: EthertiaClient, net_
     };
 
     new_egui_window("Server List").show(ctx_mut, |ui| {
+    // Local state for export background task and result
         let h = ui.available_height();
 
         ui.vertical_centered(|ui| {
@@ -272,6 +273,8 @@ pub fn ui_localsaves(
     mut ctx: EguiContexts,
     mut cli: EthertiaClient,
     mut idx_editing: Local<Option<usize>>,
+    mut tx_gen_name: Local<String>,
+    mut tx_gen_seed: Local<String>,
     serv_cfg: Option<Res<ServerSettings>>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
@@ -287,67 +290,172 @@ pub fn ui_localsaves(
             ui.add_space(8.0);
         }
 
+        // Gather saves from disk
+        let saves_root = crate::util::saves_root();
+        let mut saves: Vec<(String, Option<serde_json::Value>)> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&saves_root) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    let folder = e.file_name().to_string_lossy().into_owned();
+                    let meta_path = p.join("meta.json");
+                    let meta = meta_path
+                        .exists()
+                        .then(|| std::fs::read_to_string(&meta_path).ok())
+                        .flatten()
+                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+                    saves.push((folder, meta));
+                }
+            }
+        }
+
+        // Prepare deferred actions to avoid multiple mutable borrows of `cli` inside closures
+        let create_requested = std::cell::Cell::new(false);
+        let mut enter_request: Option<(String, Option<u64>)> = None;
+        let mut export_request: Option<(String, bool)> = None; // (save_name, include_cache)
+
         ui_lr_panel(
             ui,
             false,
             |ui| {
                 if ui.btn_borderless("New World").clicked() {
-                    // cli.data().curr_ui = CurrentUI::LocalWorldNew;
+                    create_requested.set(true);
                 }
                 if ui.btn_borderless("Refresh").clicked() {}
             },
             |ui| {
-                for idx in 0..28 {
-                    let is_editing = idx_editing.is_some_and(|i| i == idx);
-
-                    // World Item
-                    ui.group(|ui| {
-                        // Line1:
-                        ui.horizontal(|ui| {
-                            // Left: Title
-                            ui.colored_label(Color32::WHITE, "World Name").on_hover_text(
-                                "Path: /Saves/Saa
-Size: 10.3 MiB
-Time Modified: 2024.02.01 11:20 AM
-Time Created: 2024.02.01 11:20 AM
-Inhabited: 10.3 hours",
-                            );
-                            // Right: Info
-                            ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
-                                ui.label("3 days ago · 13 MB");
-                            });
-                        });
-                        // Line2:
-                        ui.horizontal(|ui| {
-                            // Left: Description
-                            ui.label("Survival · Cheats");
-                            // Right: Ops
-                            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
-                                if is_editing {
-                                    if ui.btn("✅").clicked() {
-                                        *idx_editing = None;
+                // two-column layout: left = saves list, right = generation console
+                ui.columns(2, |cols| {
+                            // Left: saves list
+                    cols[0].vertical(|ui| {
+                                // Prominent Create World button
+                                ui.centered_and_justified(|ui| {
+                                    ui.add_space(6.0);
+                                    if sfx_play(ui.add_sized([320., 52.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
+                                        create_requested.set(true);
                                     }
+                                    ui.add_space(6.0);
+                                });
 
-                                    ui.btn("🗑").on_hover_text("Delete").clicked();
-                                } else {
-                                    if ui.btn("⛭").on_hover_text("Edit").clicked() {
-                                        *idx_editing = Some(idx);
-                                    }
-                                    if ui.btn("▶").on_hover_text("Play").clicked() {
-                                        if let Some(serv_cfg) = &serv_cfg {
-                                            // cli.enter_world();
-                                            cli.connect_server(format!("127.0.0.1:{}", serv_cfg.port));
+                                ui.separator();
+                        if saves.is_empty() {
+                            ui.label("No local saves found.");
+                            ui.small("Create a world using the generation console on the right.");
+                            return;
+                        }
+
+                        for (idx, (folder, meta)) in saves.iter().enumerate() {
+                            let is_editing = idx_editing.is_some_and(|i| i == idx);
+                            ui.group(|ui| {
+                                ui.horizontal(|ui| {
+                                    let display_name = meta
+                                        .as_ref()
+                                        .and_then(|m| m.get("name"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| folder.clone());
+                                    ui.colored_label(Color32::WHITE, display_name.clone()).on_hover_text(folder.clone());
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                                        if let Some(m) = meta.as_ref() {
+                                            if let Some(seed_v) = m.get("seed").and_then(|v| v.as_u64()) {
+                                                ui.label(format!("seed: {:016x}", seed_v));
+                                            }
                                         }
+                                    });
+                                });
+
+                                ui.horizontal(|ui| {
+                                    ui.label("Singleplayer");
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                                            if is_editing {
+                                            if ui.btn("✅").clicked() {
+                                                *idx_editing = None;
+                                            }
+                                            if ui.btn("🗑").on_hover_text("Delete").clicked() {
+                                                let _ = std::fs::remove_dir_all(saves_root.join(folder));
+                                            }
+                                        } else {
+                                            if ui.btn("⟭").on_hover_text("Edit").clicked() {
+                                                *idx_editing = Some(idx);
+                                            }
+                                            if ui.btn("▶").on_hover_text("Play").clicked() {
+                                                let seed = meta.as_ref().and_then(|m| m.get("seed")).and_then(|v| v.as_u64());
+                                                enter_request = Some((folder.clone(), seed));
+                                            }
+                                            // Export buttons
+                                            if ui.small_button("Export").clicked() {
+                                                export_request = Some((folder.clone(), false));
+                                            }
+                                            if ui.small_button("Export+Cache").clicked() {
+                                                export_request = Some((folder.clone(), true));
+                                            }
+                                        }
+                                    });
+                                });
+                            });
+                            ui.separator();
+                        }
+                    });
+
+                    // Right: generation console
+                    cols[1].vertical(|ui| {
+                        ui.heading("Generation Console");
+                        ui.label("Create a new world by specifying a name and seed.");
+                        ui.add_space(8.0);
+
+                        ui.horizontal(|ui| {
+                            ui.label("Name:");
+                            ui.add(egui::TextEdit::singleline(&mut *tx_gen_name));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Seed:");
+                            ui.add(egui::TextEdit::singleline(&mut *tx_gen_seed));
+                        });
+
+                        ui.horizontal(|ui| {
+                            if ui.button("Generate (Random Seed)").clicked() {
+                                let s = util::current_timestamp_millis() as u64 ^ (std::process::id() as u64);
+                                let mut name = tx_gen_name.clone();
+                                if name.trim().is_empty() {
+                                    name = format!("world_{:016x}", s);
+                                }
+                                enter_request = Some((name, Some(s)));
+                            }
+                            if ui.button("Generate").clicked() {
+                                let seed_val = tx_gen_seed.parse::<u64>().ok();
+                                let mut name = tx_gen_name.clone();
+                                if name.trim().is_empty() {
+                                    if let Some(sv) = seed_val {
+                                        name = format!("world_{:016x}", sv);
+                                    } else {
+                                        name = format!("world_{:016x}", util::current_timestamp_millis() as u64);
                                     }
                                 }
-                            });
+                                enter_request = Some((name, seed_val));
+                            }
                         });
                     });
-                }
+                });
             },
         );
+
+        // Execute deferred actions now with exclusive mutable access to `cli`.
+        if create_requested.get() {
+            cli.data().curr_ui = CurrentUI::LocalWorldNew;
+        }
+        if let Some((name, seed)) = enter_request {
+            cli.enter_world_with_save(Some(name), seed);
+        }
+        if let Some((save_name, include_cache)) = export_request {
+            match crate::voxel::chunk_storage::export_save_as_zip(&save_name, include_cache) {
+                Ok(path) => info!("Exported save {} -> {:?}", save_name, path),
+                Err(err) => warn!("Failed to export save {}: {}", save_name, err),
+            }
+        }
     });
 }
+    
 
 #[derive(Default, Debug, PartialEq)]
 pub enum Difficulty {
@@ -359,27 +467,21 @@ pub enum Difficulty {
 
 pub fn ui_create_world(
     mut ctx: EguiContexts,
-    mut cli: ResMut<ClientInfo>,
+    mut cli: EthertiaClient,
     mut tx_world_name: Local<String>,
     mut tx_world_seed: Local<String>,
     mut _difficulty: Local<Difficulty>,
+    mut tx_terrain_is_planet: Local<bool>,
+    mut tx_planet_x: Local<String>,
+    mut tx_planet_y: Local<String>,
+    mut tx_planet_z: Local<String>,
+    mut tx_planet_radius: Local<String>,
+    mut tx_planet_thickness: Local<String>,
+    mut tx_gravity: Local<String>,
 ) {
-    let Ok(ctx_mut) = ctx.ctx_mut() else {
-        return;
-    };
+    let Ok(ctx_mut) = ctx.ctx_mut() else { return };
 
     new_egui_window("New World").show(ctx_mut, |ui| {
-        // ui_lr_panel(ui, true, |ui| {
-        //     if sfx_play(ui.selectable_label(true, "General")).clicked() {
-
-        //     }
-        //     if sfx_play(ui.selectable_label(false, "Generation")).clicked() {
-
-        //     }
-        //     if sfx_play(ui.selectable_label(false, "Gamerules")).clicked() {
-
-        //     }
-        // }, |ui| {
         let space = 14.;
 
         ui.label("Name:");
@@ -406,7 +508,6 @@ pub fn ui_create_world(
         });
         ui.add_space(space);
 
-        ui.label("Difficulty:");
         egui::ComboBox::from_id_source("Difficulty")
             .selected_text(format!("{:?}", *_difficulty))
             .show_ui(ui, |ui| {
@@ -417,13 +518,71 @@ pub fn ui_create_world(
 
         ui.add_space(space);
 
+        ui.separator();
+        ui.heading("Generator Parameters");
+        ui.label("Terrain Mode:");
+        egui::ComboBox::from_id_source("terrain_mode")
+            .selected_text(if *tx_terrain_is_planet { "Planet" } else { "Flat" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut *tx_terrain_is_planet, true, "Planet");
+                ui.selectable_value(&mut *tx_terrain_is_planet, false, "Flat");
+            });
+
+        ui.horizontal(|ui| {
+            ui.label("Planet Center X:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_planet_x));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Planet Center Y:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_planet_y));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Planet Center Z:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_planet_z));
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Planet Radius:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_planet_radius));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Shell Thickness:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_planet_thickness));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Gravity:");
+            ui.add(egui::TextEdit::singleline(&mut *tx_gravity));
+        });
+
         ui.add_space(22.);
 
-        sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked();
+        if sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
+            // Apply settings to client config and enter world
+            let seed_val = tx_world_seed.parse::<u64>().ok().unwrap_or_else(|| util::current_timestamp_millis() as u64);
+            let mut name = tx_world_name.clone();
+            if name.trim().is_empty() {
+                name = format!("world_{:016x}", seed_val);
+            }
+
+            // Parse generator params
+            let px = tx_planet_x.parse::<f32>().unwrap_or(cli.cfg.planet_center[0]);
+            let py = tx_planet_y.parse::<f32>().unwrap_or(cli.cfg.planet_center[1]);
+            let pz = tx_planet_z.parse::<f32>().unwrap_or(cli.cfg.planet_center[2]);
+            let pr = tx_planet_radius.parse::<f32>().unwrap_or(cli.cfg.planet_radius);
+            let pt = tx_planet_thickness.parse::<f32>().unwrap_or(cli.cfg.planet_shell_thickness);
+            let g = tx_gravity.parse::<f32>().unwrap_or(cli.cfg.gravity_accel);
+
+            cli.cfg.terrain_mode = if *tx_terrain_is_planet { crate::client::settings::TerrainMode::Planet } else { crate::client::settings::TerrainMode::Flat };
+            cli.cfg.planet_center = [px, py, pz];
+            cli.cfg.planet_radius = pr;
+            cli.cfg.planet_shell_thickness = pt;
+            cli.cfg.gravity_accel = g;
+
+            cli.enter_world_with_save(Some(name), Some(seed_val));
+        }
         ui.add_space(4.);
         if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Cancel"))).clicked() {
-            cli.curr_ui = CurrentUI::LocalWorldList;
+            cli.data().curr_ui = CurrentUI::LocalWorldList;
         }
-        // });
     });
 }

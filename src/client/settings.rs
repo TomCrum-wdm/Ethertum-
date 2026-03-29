@@ -1,4 +1,4 @@
-use bevy::reflect::{Reflect, TypePath, FromReflect};
+use bevy::reflect::Reflect;
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
 pub enum TerrainMode {
     Planet,
@@ -38,7 +38,7 @@ fn on_app_init(mut cfg: ResMut<ClientSettings>) {
     }
 }
 
-fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ClientSettings>) {
+fn on_app_exit(mut exit_events: MessageReader<bevy::app::AppExit>, cfg: Res<ClientSettings>) {
     for _ in exit_events.read() {
         info!("Program Terminate");
 
@@ -240,6 +240,13 @@ pub struct ClientSettings {
     #[reflect(ignore)]
     pub controls: ControlsConfig,
 
+    // Custom planet parameters (persisted in client settings)
+    #[reflect(ignore)]
+    pub planet_center: [f32; 3],
+    pub planet_radius: f32,
+    pub planet_shell_thickness: f32,
+    pub gravity_accel: f32,
+
     pub terrain_mode: TerrainMode, // 新增：地形模式
 }
 
@@ -256,6 +263,10 @@ impl Default for ClientSettings {
 
             chunks_load_distance: IVec2::new(4, 3),
             controls: ControlsConfig::default(),
+            planet_center: [0.0, 512.0, 0.0],
+            planet_radius: 512.0,
+            planet_shell_thickness: 96.0,
+            gravity_accel: 9.81,
             terrain_mode: TerrainMode::Planet, // 默认球体
         }
     }

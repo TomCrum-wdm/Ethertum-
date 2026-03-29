@@ -27,10 +27,9 @@ use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{ScreenSpaceReflections};
 use bevy_egui::{egui::{
-    self, style::HandleShape, Align2, Color32, FontData, FontDefinitions, FontFamily, Layout, Pos2, Response, Rounding, Stroke, Ui, WidgetText,
-}, EguiContextSettings, EguiContexts, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, PrimaryEguiContext};
+    self, Align2, Color32, FontData, FontDefinitions, FontFamily, Layout, Pos2, Response, Ui, WidgetText,
+}, EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
 use egui_extras::{Size, StripBuilder};
-use rand::Rng;
 
 use crate::client::prelude::*;
 
@@ -93,11 +92,15 @@ impl Plugin for UiPlugin {
 
         app.add_systems(First, play_bgm);
 
+        // 注册编辑器插件（上帝模式/自由相机/编辑器）
         app.add_plugins((
             FrameTimeDiagnosticsPlugin::default(),
             EntityCountDiagnosticsPlugin::default(),
             // SystemInformationDiagnosticsPlugin,
         ));
+
+        #[cfg(feature = "bevy_editor_pls")]
+        app.add_plugins(crate::client::editor::EditorPlugin);
 
         /*
         // Debug UI
@@ -211,7 +214,7 @@ pub fn ui_safe_top() -> f32 {
     }
 }
 
-pub fn new_egui_window(title: &str) -> egui::Window {
+pub fn new_egui_window(title: &str) -> egui::Window<'_> {
     let size = [680., 420.];
 
     let mut w = egui::Window::new(title)
@@ -602,9 +605,9 @@ fn sync_ui_window_metrics_system(query_window: Query<&Window, With<PrimaryWindow
 }
 
 fn ui_example_system(
-    mut ui_state: ResMut<UiState>,
+    _ui_state: ResMut<UiState>,
     mut is_initialized: Local<bool>,
-    mut contexts: EguiContexts,
+    _contexts: EguiContexts,
 ) -> Result {
     if !*is_initialized {
         *is_initialized = true;
@@ -612,7 +615,7 @@ fn ui_example_system(
     Ok(())
 }
 
-fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, _limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
     if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
         if sfx_state.back_requested {
             sfx_state.back_requested = false;
@@ -709,9 +712,13 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                     let p2 = Pos2::new(p.x, p.y + ui.available_height());
                     ui.painter().line_segment([p, p2], ui.visuals().widgets.noninteractive.bg_stroke);
                 }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    add_main(ui);
-                });
+                egui::ScrollArea::vertical()
+                    .max_width(ui.available_width() - 24.0)
+                    .show(ui, |ui| {
+                        add_main(ui);
+                        ui.add_space(32.0); // 允许底部多滚动一段距离
+                    });
+                ui.add_space(16.0); // 右侧整体边距
             });
         });
 }

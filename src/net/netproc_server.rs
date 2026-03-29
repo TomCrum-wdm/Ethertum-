@@ -8,10 +8,9 @@ use bevy_renet::{
 };
 
 use crate::{
-    net::{packet::{CellData, InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
+    net::{packet::{InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
     server::prelude::*,
-    util::{current_timestamp_millis, AsMutRef},
-    voxel::{ChunkSystem, ServerChunkSystem},
+    util::current_timestamp_millis,
 };
 
 fn starter_inventory() -> Vec<NetItemStack> {
@@ -69,7 +68,7 @@ fn bind_server_endpoint(mut cmds: Commands, cfg: Res<ServerSettings>) {
 }
 
 pub fn server_sys(
-    mut server_events: EventReader<ServerEvent>,
+    mut server_events: MessageReader<ServerEvent>,
     mut server: ResMut<RenetServer>,
     transport: Option<Res<NetcodeServerTransport>>,
 
@@ -156,7 +155,8 @@ pub fn server_sys(
                     // 模拟登录验证
                     std::thread::sleep(Duration::from_millis(800));
 
-                    let entity_id = EntityId::from_server(cmds.spawn(Transform::default()).id());
+                    // Spawn player entity at a safe default height above ground
+                    let entity_id = EntityId::from_server(cmds.spawn(Transform::from_translation(Vec3::new(0.0, 64.0, 0.0))).id());
 
                     // Login Success
                     server.send_packet(client_id, &SPacket::LoginSuccess { player_entity: entity_id });
@@ -203,7 +203,7 @@ pub fn server_sys(
                             user_id: uuid,
                             client_id,
                             entity_id,
-                            position: Vec3::ZERO,
+                            position: Vec3::new(0.0, 64.0, 0.0),
                             chunks_loaded: HashSet::default(),
                             chunks_load_distance: IVec2::new(-1, -1), // 4 2
                             ping_rtt: 0,

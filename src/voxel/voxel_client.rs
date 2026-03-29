@@ -1,5 +1,5 @@
 use bevy::{
-    color::palettes::css, pbr::{ExtendedMaterial, MaterialExtension}, prelude::*, render::{
+    color::palettes::css, pbr::ExtendedMaterial, prelude::*, render::{
         render_resource::PrimitiveTopology,
     }, tasks::AsyncComputeTaskPool, platform::collections::{HashMap, HashSet},
     asset::{RenderAssetUsages},
@@ -212,6 +212,7 @@ fn chunks_detect_load_and_unload(
     mut chunk_sys: ResMut<ClientChunkSystem>,
     mut chunks_loading: Local<HashSet<IVec3>>, // for detect/skip if is loading
     cfg: Res<ClientSettings>,
+    worldinfo: Option<Res<WorldInfo>>,
 
     mut cmds: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -224,6 +225,20 @@ fn chunks_detect_load_and_unload(
     };
     let vp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3()); // viewer pos
     let vd = cfg.chunks_load_distance;
+
+    // Determine generation parameters (capture for async tasks)
+    let (terrain_mode_capture, planet_center_capture, planet_radius_capture, shell_thickness_capture, world_name_capture, seed_capture) = if let Some(w) = &worldinfo {
+        (
+            w.terrain_mode,
+            IVec3::new(w.planet_center.x as i32, w.planet_center.y as i32, w.planet_center.z as i32),
+            w.planet_radius,
+            w.planet_shell_thickness,
+            Some(w.name.clone()),
+            w.seed,
+        )
+    } else {
+        (cfg.terrain_mode, IVec3::new(0, 512, 0), 512.0f32, 96.0f32, None, 0)
+    };
 
     // Chunks Detect Load/Gen
 
@@ -240,19 +255,39 @@ fn chunks_detect_load_and_unload(
         }
 
         let tx = tx_chunk_load.clone();
-        let task = AsyncComputeTaskPool::get().spawn(async move {
-            // info!("Load Chunk: {:?}", chunkpos);
-            let mut chunk = Chunk::new(chunkpos);
+            // clone `world_name_capture` per task so we don't move the outer capture
+            let world_name_value = world_name_capture.clone();
+            let task = AsyncComputeTaskPool::get().spawn(async move {
+                // Protect generation code from panics to avoid crashing the app.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // info!("Load Chunk: {:?}", chunkpos);
+                    let mut chunk = Chunk::new(chunkpos);
 
-            // 获取全局ClientSettings
-            // TODO: 这里应由上层系统传入settings参数，临时用默认值防止编译错误
-            let settings = crate::client::settings::ClientSettings::default();
-            super::worldgen::generate_chunk(&mut chunk, &settings);
+                    // Try to load from world save first. If not present, generate.
+                    let loaded = super::chunk_storage::load_chunk_from_world(
+                        &mut chunk,
+                        world_name_value.as_deref(),
+                        seed_capture,
+                    );
+                    if !loaded {
+                        super::worldgen::generate_chunk_with_params(
+                            &mut chunk,
+                            terrain_mode_capture,
+                            planet_center_capture,
+                            planet_radius_capture,
+                            shell_thickness_capture,
+                        );
+                    }
 
-            if tx.send(chunk).is_err() {
-                warn!("Chunk loading channel closed");
-            }
-        });
+                    if tx.send(chunk).is_err() {
+                        warn!("Chunk loading channel closed");
+                    }
+                }));
+
+                if let Err(err) = result {
+                    warn!("Chunk generation panicked at {:?}", err);
+                }
+            });
         task.detach();
         chunks_loading.insert(chunkpos);
     });
@@ -268,7 +303,16 @@ fn chunks_detect_load_and_unload(
     let chunkpos_all = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
     for chunkpos in chunkpos_all {
         if !crate::voxel::is_chunk_in_load_distance(vp, chunkpos, vd) {
-            chunk_sys.despawn_chunk(chunkpos, &mut cmds);
+            if let Some(chunkptr) = chunk_sys.despawn_chunk(chunkpos, &mut cmds) {
+                // Save the chunk to disk on unload
+                if let Some(w) = &worldinfo {
+                    let guard = crate::util::lock_arc(&chunkptr);
+                    crate::voxel::chunk_storage::save_chunk_to_world(&*guard, Some(&w.name), w.seed);
+                } else {
+                    let guard = crate::util::lock_arc(&chunkptr);
+                    crate::voxel::chunk_storage::save_chunk_to_world(&*guard, None, 0);
+                }
+            }
         }
     }
 }
@@ -322,6 +366,7 @@ fn chunks_remesh_enqueue(
             let tx = tx_chunks_meshing.clone();
 
             let task = AsyncComputeTaskPool::get().spawn(async move {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut _vbuf = THREAD_LOCAL_VERTEX_BUFFERS
                     .get_or(|| RefCell::new((VertexBuffer::default(), VertexBuffer::default(), VertexBuffer::default())))
                     .borrow_mut();
@@ -333,19 +378,19 @@ fn chunks_remesh_enqueue(
                 let mesh_handle_foliage;
                 let mesh_handle_liquid;
                 {
-                    let chunk = chunkptr.as_ref();
+                    let guard = crate::util::lock_arc(&chunkptr);
 
                     // Generate Mesh
-                    meshgen::generate_chunk_mesh(&mut _vbuf.0, chunk);
+                    meshgen::generate_chunk_mesh(&mut _vbuf.0, &*guard);
 
-                    meshgen::generate_chunk_mesh_foliage(&mut _vbuf.1, chunk);
+                    meshgen::generate_chunk_mesh_foliage(&mut _vbuf.1, &*guard);
 
-                    meshgen::generate_chunk_mesh_liquid(&mut _vbuf.2, chunk);
+                    meshgen::generate_chunk_mesh_liquid(&mut _vbuf.2, &*guard);
 
-                    entity = chunk.entity;
-                    mesh_handle_terrain = chunk.mesh_handle_terrain.clone();
-                    mesh_handle_foliage = chunk.mesh_handle_foliage.clone();
-                    mesh_handle_liquid = chunk.mesh_handle_liquid.clone();
+                    entity = guard.entity;
+                    mesh_handle_terrain = guard.mesh_handle_terrain.clone();
+                    mesh_handle_foliage = guard.mesh_handle_foliage.clone();
+                    mesh_handle_liquid = guard.mesh_handle_liquid.clone();
                 }
                 // let dbg_time = Instant::now() - dbg_time;
 
@@ -401,6 +446,11 @@ fn chunks_remesh_enqueue(
                     .is_err()
                 {
                     warn!("Chunk meshing channel closed");
+                }
+                }));
+
+                if let Err(err) = result {
+                    warn!("Chunk meshing panicked: {:?}", err);
                 }
             });
             task.detach();
@@ -480,13 +530,13 @@ fn raycast(
     query_cam: Query<&GlobalTransform, With<CharacterControllerCamera>>, // ray
     query_player: Query<Entity, With<CharacterController>>,              // exclude collider
     mut hit_result: ResMut<HitResult>,
-    touches: Res<Touches>,
-    touch_buttons: Res<TouchButtonState>,
+    _touches: Res<Touches>,
+    _touch_buttons: Res<TouchButtonState>,
 
     query_input: Query<&ActionState<InputAction>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
     cli: Res<ClientInfo>,
-    cfg: Res<ClientSettings>,
+    _cfg: Res<ClientSettings>,
     vox_brush: Res<VoxelBrush>,
 ) {
     let Ok(cam_trans) = query_cam.single() else {
@@ -563,28 +613,28 @@ fn raycast(
             // +0.01*norm: for placing cube like MC.
             let p = hit_result.voxel_pos + lp + if do_place { 1 } else { 0 } * hit_result.normal.normalize_or_zero().as_ivec3();
 
-            if let Some(v) = chunk_sys.get_voxel(p) {
-                let v = v.as_mut();
+            if let Some(chunkptr) = chunk_sys.get_chunk(Chunk::as_chunkpos(p)) {
+                let chunkptr = chunkptr.clone();
+                let mut guard = crate::util::lock_arc(&chunkptr);
+                let vox = guard.at_voxel_mut(Chunk::as_localpos(p));
                 let f = (n as f32 - lp.as_vec3().length()).max(0.) * brush.strength;
 
-                v.set_isovalue(v.isovalue() + if do_break { -f } else { f });
+                vox.set_isovalue(vox.isovalue() + if do_break { -f } else { f });
 
                 if f > 0.0 || (n == 0 && f == 0.0) {
-                    // placing single
                     if do_place {
-                        // && c.tex_id == 0 {
-                        v.tex_id = brush.tex;
-                        v.shape_id = brush.shape;
-
-                        // placing Block
+                        vox.tex_id = brush.tex;
+                        vox.shape_id = brush.shape;
                         if brush.shape != VoxShape::Isosurface {
-                            v.set_isovalue(0.0);
+                            vox.set_isovalue(0.0);
                         }
-                    } else if v.is_isoval_empty() {
-                        v.tex_id = 0;
+                    } else if vox.is_isoval_empty() {
+                        vox.tex_id = 0;
                     }
                 }
 
+                // release guard before mutably borrowing chunk_sys
+                drop(guard);
                 chunk_sys.mark_chunk_remesh(Chunk::as_chunkpos(p)); // CLIS
             }
         });
@@ -754,11 +804,11 @@ impl ClientChunkSystem {
             .set_parent_in_place(self.entity)
             .id();
 
-        let chunkptr = Arc::new(chunk);
+        let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
 
         let chunkpos;
         {
-            let chunk = chunkptr.as_mut();
+            let mut chunk = crate::util::lock_arc(&chunkptr);
             chunkpos = chunk.chunkpos;
             chunk.chunkptr_weak = Arc::downgrade(&chunkptr);
 
@@ -771,15 +821,15 @@ impl ClientChunkSystem {
                 // set neighbor_chunks cache
                 chunk.neighbor_chunks[neib_idx] = {
                     if let Some(neib_chunkptr) = self.get_chunk(neib_chunkpos).cloned() {
-                        let neib_chunk = neib_chunkptr.as_mut();
+                        let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
 
                         // update neighbor's `neighbor_chunk`
                         neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = Some(Arc::downgrade(&chunkptr));
 
-                        if neib_chunk.is_neighbors_all_loaded() && !neib_chunk.is_populated {
+                            if neib_chunk.is_neighbors_all_loaded() && !neib_chunk.is_populated {
                             // neighbors_completed.push(neib_chunk.chunkpos);
                             neib_chunk.is_populated = true;
-                            super::worldgen::populate_chunk(neib_chunk); // todo: ChunkGen Thread
+                            super::worldgen::populate_chunk(&mut *neib_chunk); // todo: ChunkGen Thread
 
                             self.mark_chunk_remesh(neib_chunk.chunkpos);
 
@@ -817,16 +867,21 @@ impl ClientChunkSystem {
     pub fn despawn_chunk(&mut self, chunkpos: IVec3, cmds: &mut Commands) -> Option<ChunkPtr> {
         let chunk = self.chunks.remove(&chunkpos)?;
 
-        // update neighbors' `neighbors_chunk`
-        for neib_idx in 0..Chunk::NEIGHBOR_DIR.len() {
-            if let Some(neib_chunkptr) = chunk.get_chunk_neib(neib_idx) {
-                let neib_chunk = neib_chunkptr.as_mut(); // problematic: may cause data tiring
+        let entity = {
+            let mut guard = crate::util::lock_arc(&chunk);
 
-                neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = None;
+            // update neighbors' `neighbors_chunk`
+            for neib_idx in 0..Chunk::NEIGHBOR_DIR.len() {
+                if let Some(neib_chunkptr) = guard.get_chunk_neib(neib_idx) {
+                    let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
+
+                    neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = None;
+                }
             }
-        }
 
-        cmds.entity(chunk.entity).despawn();
+            guard.entity
+        };
+        cmds.entity(entity).despawn();
 
         Some(chunk)
     }
@@ -835,7 +890,7 @@ impl ClientChunkSystem {
 fn asset_load_ui_system(
     asset_server: Res<AssetServer>,
     assets: Option<Res<AssetDebug>>,
-    mut texts: Query<&mut Text>,
+    texts: Query<&mut Text>,
 ) {
     // no-op placeholder when UI is not available
     let _ = (asset_server, assets, texts);

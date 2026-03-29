@@ -25,5 +25,8 @@ pub mod prelude {
     pub use crate::item::{Inventory, ItemStack};
 }
 
-#[cfg(feature = "target_native_os")]
+// Editor plugin depends on optional crate `bevy_editor_pls`.
+// Only compile the module when both the native target and the optional
+// `bevy_editor_pls` dependency are enabled.
+#[cfg(all(feature = "target_native_os", feature = "bevy_editor_pls"))]
 pub mod editor;

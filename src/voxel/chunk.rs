@@ -1,5 +1,5 @@
 
-use std::sync::Weak;//解释：Weak 是 Rust 标准库中提供的一种智能指针类型，用于实现非拥有（non-owning）引用。它与 Arc（Atomic Reference Counted）配合使用，Arc 用于实现共享所有权，而 Weak 则用于实现弱引用。当你使用 Arc 来创建一个共享所有权的智能指针时，Arc 会维护一个
+use std::sync::{Weak, Mutex};//解释：Weak 是 Rust 标准库中提供的一种智能指针类型，用于实现非拥有（non-owning）引用。它与 Arc（Atomic Reference Counted）配合使用，Arc 用于实现共享所有权，而 Weak 则用于实现弱引用。当你使用 Arc 来创建一个共享所有权的智能指针时，Arc 会维护一个
 
 use crate::prelude::*;
 
@@ -20,10 +20,10 @@ pub struct Chunk {
 
     // cached neighbor chunks that loaded to the ChunkSystem.
     // for Quick Access without global find neighbor chunk by chunkpos
-    pub neighbor_chunks: [Option<Weak<Chunk>>; Self::NEIGHBOR_DIR.len()],
+    pub neighbor_chunks: [Option<Weak<Mutex<Chunk>>>; Self::NEIGHBOR_DIR.len()],
 
     // Self Arc. for export self Arc in get_chunk_neib().  assigned by ChunkSystem::spawn_chunk()
-    pub chunkptr_weak: Weak<Chunk>,  
+    pub chunkptr_weak: Weak<Mutex<Chunk>>,  
 }
 
 impl Chunk {
@@ -55,8 +55,8 @@ impl Chunk {
         &self.voxels[Chunk::local_idx(localpos)]
     }
 
-    pub fn at_voxel_mut(&self, localpos: IVec3) -> &mut Vox {
-        self.at_voxel(localpos).as_mut()
+    pub fn at_voxel_mut(&mut self, localpos: IVec3) -> &mut Vox {
+        &mut self.voxels[Chunk::local_idx(localpos)]
     }
 
     pub fn get_voxel_rel(&self, relpos: IVec3) -> Option<Vox> {
@@ -64,20 +64,22 @@ impl Chunk {
             Some(*self.at_voxel(relpos))
         } else {
             let neib_chunkptr = self.get_chunk_rel(relpos)?;
-            Some(*neib_chunkptr.at_voxel(Chunk::as_localpos(relpos)))
+            let guard = crate::util::lock_arc(&neib_chunkptr);
+            Some(*guard.at_voxel(Chunk::as_localpos(relpos)))
         }
     }
 
-    pub fn set_voxel_rel(&self, relpos: IVec3, mut visitor: impl FnMut(&mut Vox)) -> Option<Vox> {
-        let vox;
-        let neib_chunkptr;
+    pub fn set_voxel_rel(&mut self, relpos: IVec3, mut visitor: impl FnMut(&mut Vox)) -> Option<Vox> {
         if Chunk::is_localpos(relpos) {
-            vox = self.at_voxel(relpos);
-        } else {
-            neib_chunkptr = self.get_chunk_rel(relpos)?;
-            vox = neib_chunkptr.at_voxel(Chunk::as_localpos(relpos));
+            let vox = self.at_voxel_mut(relpos);
+            visitor(vox);
+            return Some(*vox);
         }
-        visitor(vox.as_mut());
+
+        let neib_chunkptr = self.get_chunk_rel(relpos)?;
+        let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
+        let vox = neib_chunk.at_voxel_mut(Chunk::as_localpos(relpos));
+        visitor(vox);
         Some(*vox)
     }
     pub fn get_voxel_rel_or_default(&self, relpos: IVec3) -> Vox {
@@ -210,7 +212,7 @@ impl Chunk {
     ];
 
     pub fn is_neighbors_all_loaded(&self) -> bool {
-        !self.neighbor_chunks.iter().any(|e| e.is_none())
+        self.neighbor_chunks.iter().all(Option::is_some)
     }
 
     fn neighbor_idx(relpos: IVec3) -> Option<usize> {

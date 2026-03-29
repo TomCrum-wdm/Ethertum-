@@ -11,12 +11,30 @@ pub mod vtx {
 pub mod registry;
 
 // Unsafe as_mut()
-
+// Clippy warns about `mut_from_ref`; this function intentionally performs an
+// unsafe cast. Keep lint allowed but document usage to avoid silent UB.
+//
+// NOTE: This function is UNSAFE by design and can cause undefined behaviour
+// if the caller violates Rust's aliasing/mutability invariants. Prefer using
+// the safe `lock_arc` helper for shared, concurrent data (see below).
 #[allow(invalid_reference_casting)]
-pub fn as_mut<T>(v: &T) -> &mut T {
+#[allow(clippy::mut_from_ref)]
+#[deprecated(note = "unsafe helper; prefer using Arc<Mutex<T>> + lock_arc or safe ownership refactors")]
+pub(crate) fn as_mut<T>(v: &T) -> &mut T {
     unsafe { &mut *((v as *const T) as *mut T) }
 }
 
+// Thread-safe locking helper for Arc<Mutex<T>> resources.
+// Use this where the shared value is stored in an `Arc<Mutex<T>>` and
+// you need mutable access without invoking undefined behaviour.
+// Example: `let mut g = lock_arc(&arc_mutex);` then use `*g`.
+use std::sync::{Arc, Mutex, MutexGuard};
+
+pub fn lock_arc<T>(a: &Arc<Mutex<T>>) -> MutexGuard<'_, T> {
+    a.lock().expect("lock_arc: failed to acquire mutex")
+}
+
+#[allow(clippy::mut_from_ref)]
 pub trait AsMutRef<T> {
     fn as_mut(&self) -> &mut T;
 }
@@ -98,9 +116,26 @@ pub fn hashcode<T: Hash>(t: &T) -> u64 {
     s.finish()
 }
 
+use std::path::PathBuf;
+
+/// Returns the root directory used for saves, adapted per-platform.
+pub fn saves_root() -> PathBuf {
+    #[cfg(target_os = "android")]
+    {
+        // On Android prefer $HOME (app-specific data dir) if present, otherwise fallback to current dir.
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join("saves");
+        }
+        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("saves");
+    }
+
+    // Default: relative 'saves' folder in working directory.
+    PathBuf::from("saves")
+}
+
 // Iter
 
-use std::sync::Arc;
+// use std::sync::Arc;  // Arc already imported above where needed
 
 pub mod iter {
     use bevy::math::{ivec3, IVec3};

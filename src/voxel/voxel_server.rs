@@ -71,7 +71,7 @@ fn chunks_load(
                 let settings = crate::client::settings::ClientSettings::default();
                 super::worldgen::generate_chunk(&mut chunk, &settings);
 
-                let chunkptr = Arc::new(chunk);
+                let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
                 if tx.send((chunkpos, chunkptr)).is_err() {
                     warn!("Server chunk loading channel closed");
                 }
@@ -85,11 +85,11 @@ fn chunks_load(
     }
 
     // Complete Chunk Load
-    while let Ok((chunkpos, chunkptr)) = rx_chunks_loading.try_recv() {
+        while let Ok((chunkpos, chunkptr)) = rx_chunks_loading.try_recv() {
         chunks_loading.remove(&chunkpos);
 
         {
-            let chunk = chunkptr.as_mut();
+            let mut chunk = crate::util::lock_arc(&chunkptr);
 
             chunk.entity = cmds
                 .spawn((
@@ -123,7 +123,10 @@ fn chunks_load(
             let Some(chunkptr) = chunkptr else {
                 continue;
             };
-            let entity = chunkptr.as_ref().entity;
+            let entity = {
+                let guard = crate::util::lock_arc(&chunkptr);
+                guard.entity
+            };
             cmds.entity(entity).despawn();
 
             net_server.broadcast_packet(&SPacket::ChunkDel { chunkpos });
@@ -153,7 +156,7 @@ fn chunks_load(
             if player.chunks_loaded.contains(&chunkpos) {
                 return;
             }
-            if let Some(chunkptr) = chunk_sys.get_chunk(chunkpos) {
+                if let Some(chunkptr) = chunk_sys.get_chunk(chunkpos) {
                 player.chunks_loaded.insert(chunkpos);
                 num_sent += 1;
 
@@ -164,7 +167,10 @@ fn chunks_load(
                     num_sent,
                     player.username
                 );
-                let data = CellData::from_chunk(chunkptr.as_ref());
+                let data = {
+                    let guard = crate::util::lock_arc(&chunkptr);
+                    CellData::from_chunk(&*guard)
+                };
                 net_server.send_packet(player.client_id, &SPacket::ChunkNew { chunkpos, voxel: data });
             }
         });
@@ -188,7 +194,10 @@ impl ServerChunkSystem {
     }
 
     fn spawn_chunk(&mut self, chunkptr: ChunkPtr) {
-        let cp = chunkptr.as_ref().chunkpos;
+        let cp = {
+            let guard = crate::util::lock_arc(&chunkptr);
+            guard.chunkpos
+        };
         self.chunks.insert(cp, chunkptr);
     }
 

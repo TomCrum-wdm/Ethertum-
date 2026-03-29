@@ -11,6 +11,20 @@ use crate::client::settings::{ClientSettings, TerrainMode};
 // use crate::client::settings::ClientSettings;
 
 pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
+    // Backwards-compatible wrapper: use default planet params
+    let planet_center = IVec3::new(0, 512, 0);
+    let planet_radius: f32 = 512.0;
+    let shell_thickness: f32 = 96.0;
+    generate_chunk_with_params(chunk, settings.terrain_mode, planet_center, planet_radius, shell_thickness);
+}
+
+pub fn generate_chunk_with_params(
+    chunk: &mut Chunk,
+    terrain_mode: TerrainMode,
+    planet_center: IVec3,
+    planet_radius: f32,
+    shell_thickness: f32,
+) {
     let seed = 100;
     // let perlin = Perlin::new(seed);
     let mut fbm = Fbm::<Perlin>::new(seed);
@@ -20,12 +34,7 @@ pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
     // fbm.persistence = 2;
 
     // 直接安全获取地形模式
-    let terrain_mode = settings.terrain_mode;
-
-    // 将球心提升到y=512，壳厚度加大，地形更厚实
-    let planet_center = IVec3::new(0, 512, 0);
-    let planet_radius: f32 = 512.0;
-    let shell_thickness: f32 = 96.0;
+    // let terrain_mode = settings.terrain_mode;
 
     for ly in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
@@ -33,7 +42,7 @@ pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
                 let lp = IVec3::new(lx, ly, lz);
                 let p = chunk.chunkpos + lp;
 
-                let (val, mut tex) = match terrain_mode {
+                let (val, tex) = match terrain_mode {
                     TerrainMode::Planet => {
                         let d = (p.as_vec3() - planet_center.as_vec3()).length();
                         // clamp采样参数，防止极大坐标导致NaN/inf
@@ -95,6 +104,7 @@ pub fn populate_chunk(chunk: &mut Chunk) {
 
             for ly in (0..Chunk::LEN).rev() {
                 let lp = IVec3::new(lx, ly, lz);
+                let p = chunk.chunkpos + lp;
                 let c = chunk.at_voxel_mut(lp);
 
                 if c.is_nil() {
@@ -102,8 +112,6 @@ pub fn populate_chunk(chunk: &mut Chunk) {
                 } else {
                     air_dist += 1;
                 }
-
-                let p = chunk.chunkpos + lp;
                 if c.tex_id == VoxTex::Stone {
                     let mut replace = c.tex_id;
                     if p.y < 2 && air_dist <= 2 && perlin.get([p.x as f64 / 32., p.z as f64 / 32.]) > 0.1 {
