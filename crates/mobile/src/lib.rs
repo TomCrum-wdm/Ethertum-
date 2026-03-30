@@ -4,6 +4,8 @@ use bevy::prelude::*;
 fn boot_log(message: &str) {
     use std::fs::OpenOptions;
     use std::io::Write;
+    use std::ffi::CString;
+    use std::os::raw::c_char;
 
     eprintln!("[BOOT] {}", message);
 
@@ -19,6 +21,22 @@ fn boot_log(message: &str) {
         if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
             let _ = writeln!(file, "{}", message);
             break;
+        }
+    }
+
+    // Also try to write to Android's logcat using the native __android_log_write symbol.
+    // This is a best-effort call; if the symbol isn't available the call will simply be skipped.
+    #[cfg(target_os = "android")]
+    {
+        extern "C" {
+            fn __android_log_write(prio: i32, tag: *const c_char, text: *const c_char) -> i32;
+        }
+        if let Ok(tag_c) = CString::new("ethertia") {
+            if let Ok(msg_c) = CString::new(message) {
+                unsafe {
+                    let _ = __android_log_write(4, tag_c.as_ptr(), msg_c.as_ptr());
+                }
+            }
         }
     }
 }

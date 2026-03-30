@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use zip::write::FileOptions as ZipFileOptions;
 use std::io::{Seek, Write};
+use std::thread;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct SimpleVox {
@@ -181,6 +182,42 @@ impl ChunkCache {
 }
 
 static CHUNK_CACHE: Lazy<Mutex<ChunkCache>> = Lazy::new(|| Mutex::new(ChunkCache::new(1024)));
+
+/// Spawn a background thread to load a chunk from disk into the in-memory `CHUNK_CACHE`.
+/// The loader will read and deserialize the chunk file if present and insert it into the cache.
+/// This is intended to be called from non-blocking contexts (UI / main thread) so disk I/O
+/// happens off-thread and the main thread can later pick up the chunk from the cache.
+pub fn spawn_load_chunk_into_cache(world_name: String, pos: IVec3, seed: u64) -> std::thread::JoinHandle<()> {
+    thread::spawn(move || {
+        use std::fs;
+
+        let name = if !world_name.trim().is_empty() { world_name.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-', "_") } else { format!("world_{:016x}", seed) };
+        let save_dir = crate::util::saves_root().join(&name).join("chunks");
+        let fname = format!("chunk_{}_{}_{}.bin", pos.x, pos.y, pos.z);
+        let path = save_dir.join(&fname);
+
+        if !path.exists() {
+            return;
+        }
+
+        match fs::read(&path) {
+            Ok(bytes) => {
+                if let Ok(save) = bincode::deserialize::<ChunkSave>(&bytes) {
+                    if let Ok(mut cache) = CHUNK_CACHE.lock() {
+                        cache.put(Chunk::as_chunkpos(pos), save);
+                    } else {
+                        warn!("CHUNK_CACHE mutex poisoned when background-loading chunk {:?}", pos);
+                    }
+                } else {
+                    warn!("Failed to deserialize chunk during background load: {:?}", path);
+                }
+            }
+            Err(err) => {
+                warn!("Failed to read chunk during background load {:?}: {}", path, err);
+            }
+        }
+    })
+}
 
 // update save function to populate cache on successful save
 pub fn save_chunk_to_world(chunk: &Chunk, world_name: Option<&str>, seed: u64) {
@@ -379,4 +416,77 @@ pub fn export_world_save(world_name: Option<&str>, seed: u64) -> Option<std::pat
             None
         }
     }
+}
+
+/// Spawn a background thread to run `export_save_as_zip` and return a JoinHandle.
+/// Callers (UI) should use this to avoid blocking the main thread during export.
+pub fn spawn_export_save_as_zip(save_name: String, include_cache: bool) -> std::thread::JoinHandle<anyhow::Result<std::path::PathBuf>> {
+    thread::spawn(move || export_save_as_zip(&save_name, include_cache))
+}
+
+/// Spawn a background thread to run `export_world_save` and return a JoinHandle.
+/// This avoids performing potentially large synchronous I/O on the caller's thread.
+pub fn spawn_export_world_save(world_name: Option<String>, seed: u64) -> std::thread::JoinHandle<Option<std::path::PathBuf>> {
+    thread::spawn(move || export_world_save(world_name.as_deref(), seed))
+}
+
+/// Spawn a background thread that serializes and writes a chunk to disk.
+/// The caller provides a reference to the `Chunk`; this function will clone the necessary
+/// data into a `ChunkSave` and perform the file write off-thread, then update `CHUNK_CACHE`.
+pub fn spawn_save_chunk_from_chunk(chunk: &Chunk, world_name: Option<String>, seed: u64) -> std::thread::JoinHandle<()> {
+    // Build the ChunkSave here on the caller thread to avoid borrowing across threads.
+    let cx = chunk.chunkpos.x;
+    let cy = chunk.chunkpos.y;
+    let cz = chunk.chunkpos.z;
+    let mut voxels: Vec<SimpleVox> = Vec::with_capacity(Chunk::LEN3);
+    chunk.for_voxels(|v, _i| voxels.push(SimpleVox::from(*v)));
+
+    let save = ChunkSave {
+        chunkpos: [cx, cy, cz],
+        voxels,
+        populated: chunk.is_populated,
+        chunk_format_version: 1,
+    };
+
+    let world_name_owned = world_name.unwrap_or_default();
+
+    std::thread::spawn(move || {
+        use std::fs::{self, File};
+        use std::io::Write;
+
+        let name = if !world_name_owned.trim().is_empty() { world_name_owned.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-', "_") } else { format!("world_{:016x}", seed) };
+        let save_dir = crate::util::saves_root().join(&name).join("chunks");
+        if let Err(err) = fs::create_dir_all(&save_dir) {
+            warn!("Failed to create save dir {:?}: {}", save_dir, err);
+            return;
+        }
+
+        let fname = format!("chunk_{}_{}_{}.bin", cx, cy, cz);
+        let path = save_dir.join(&fname);
+
+        match bincode::serialize(&save) {
+            Ok(bytes) => {
+                let tmp = path.with_extension("bin.tmp");
+                match File::create(&tmp) {
+                    Ok(mut f) => {
+                        if let Err(err) = f.write_all(&bytes) {
+                            warn!("Failed to write chunk tmp {:?}: {}", tmp, err);
+                            let _ = fs::remove_file(&tmp);
+                            return;
+                        }
+                        if let Err(err) = fs::rename(&tmp, &path) {
+                            warn!("Failed to rename chunk tmp to final {:?}: {}", path, err);
+                        } else {
+                            info!("Saved chunk {:?}", path);
+                            if let Ok(mut cache) = CHUNK_CACHE.lock() {
+                                cache.put(Chunk::as_chunkpos(IVec3::new(cx, cy, cz)), save.clone());
+                            }
+                        }
+                    }
+                    Err(err) => warn!("Failed to create chunk tmp {:?}: {}", tmp, err),
+                }
+            }
+            Err(err) => warn!("Failed to serialize chunk: {}", err),
+        }
+    })
 }

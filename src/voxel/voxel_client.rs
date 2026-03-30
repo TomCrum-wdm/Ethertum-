@@ -304,13 +304,13 @@ fn chunks_detect_load_and_unload(
     for chunkpos in chunkpos_all {
         if !crate::voxel::is_chunk_in_load_distance(vp, chunkpos, vd) {
             if let Some(chunkptr) = chunk_sys.despawn_chunk(chunkpos, &mut cmds) {
-                // Save the chunk to disk on unload
+                // Save the chunk to disk on unload (offload to background thread)
                 if let Some(w) = &worldinfo {
                     let guard = crate::util::lock_arc(&chunkptr);
-                    crate::voxel::chunk_storage::save_chunk_to_world(&*guard, Some(&w.name), w.seed);
+                    let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, Some(w.name.clone()), w.seed);
                 } else {
                     let guard = crate::util::lock_arc(&chunkptr);
-                    crate::voxel::chunk_storage::save_chunk_to_world(&*guard, None, 0);
+                    let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, None, 0);
                 }
             }
         }

@@ -146,13 +146,13 @@ pub fn ui_settings(
                                 let keys: Vec<_> = cs_mut.chunks.keys().cloned().collect();
                                 for cp in keys {
                                     if let Some(chunkptr) = cs_mut.despawn_chunk(cp, &mut cmds) {
-                                        if let Some(w) = &worldinfo {
-                                            let guard = crate::util::lock_arc(&chunkptr);
-                                            crate::voxel::chunk_storage::save_chunk_to_world(&*guard, Some(&w.name), w.seed);
-                                        } else {
-                                            let guard = crate::util::lock_arc(&chunkptr);
-                                            crate::voxel::chunk_storage::save_chunk_to_world(&*guard, None, 0);
-                                        }
+                                            if let Some(w) = &worldinfo {
+                                                let guard = crate::util::lock_arc(&chunkptr);
+                                                let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, Some(w.name.clone()), w.seed);
+                                            } else {
+                                                let guard = crate::util::lock_arc(&chunkptr);
+                                                let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, None, 0);
+                                            }
                                     }
                                 }
                             }
@@ -213,12 +213,19 @@ pub fn ui_settings(
                             ui.label(format!("Name: {}", w.name));
                             ui.label(format!("Seed: {:016x}", w.seed));
                             ui.add_space(6.);
-                            if ui.add(egui::Button::new("导出存档 (Zip)")).clicked() {
-                                if let Some(path) = crate::voxel::chunk_storage::export_world_save(Some(&w.name), w.seed) {
-                                    info!("Exported world to {:?}", path);
-                                } else {
-                                    warn!("Export failed for world {}", w.name);
-                                }
+                            if ui.add(egui::Button::new("导出存档 (Zip)" )).clicked() {
+                                // Run export in background to avoid blocking the UI/main thread.
+                                let world_name = w.name.clone();
+                                let seed = w.seed;
+                                let handle = crate::voxel::chunk_storage::spawn_export_world_save(Some(world_name.clone()), seed);
+                                // Detach: spawn a watcher thread that joins and logs result when ready.
+                                std::thread::spawn(move || {
+                                    match handle.join() {
+                                        Ok(Some(path)) => info!("Exported world to {:?}", path),
+                                        Ok(None) => warn!("Export failed for world {}", world_name),
+                                        Err(e) => warn!("Export thread panicked: {:?}", e),
+                                    }
+                                });
                             }
                         } else {
                             ui.label("未加载世界");

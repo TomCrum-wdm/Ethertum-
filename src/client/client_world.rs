@@ -174,8 +174,9 @@ impl WorldInfo {
     }
 }
 
-/// Persist minimal world metadata (meta.json) to saves/<name_or_seed>/meta.json
-pub fn save_world_meta_to_disk(w: &WorldInfo) {
+/// Internal synchronous implementation that writes meta.json. Accepts owned `WorldInfo` so it
+/// can be safely moved into a background thread.
+fn save_world_meta_to_disk_sync(w: WorldInfo) {
     use std::fs;
     use std::io::Write;
     use std::path::Path;
@@ -243,6 +244,12 @@ pub fn save_world_meta_to_disk(w: &WorldInfo) {
         }
         Err(err) => warn!("Failed to serialize world meta: {}", err),
     }
+}
+
+/// Persist minimal world metadata in a background thread to avoid blocking the caller.
+pub fn save_world_meta_to_disk(w: &WorldInfo) {
+    let owned = w.clone();
+    std::thread::spawn(move || save_world_meta_to_disk_sync(owned));
 }
 
 /// Marker: Despawn the Entity on World Unload.

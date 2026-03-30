@@ -9,6 +9,12 @@ pub enum TerrainMode {
 
 use crate::prelude::*;
 use std::path::PathBuf;
+use bevy::tasks::{AsyncComputeTaskPool, Task};
+use futures_lite::future::poll_once;
+use bevy::prelude::Commands;
+
+#[derive(Resource)]
+struct ClientSettingsLoadTask(Task<Option<ClientSettings>>);
 
 pub const CLIENT_SETTINGS_FILE: &str = "client.settings.json";
 
@@ -23,17 +29,37 @@ fn client_settings_path() -> PathBuf {
     PathBuf::from(CLIENT_SETTINGS_FILE)
 }
 
-fn on_app_init(mut cfg: ResMut<ClientSettings>) {
+fn on_app_init(mut cfg: ResMut<ClientSettings>, mut commands: Commands) {
     let cfg_path = client_settings_path();
-    info!("Loading {}", cfg_path.display());
-    match std::fs::read_to_string(&cfg_path) {
-        Ok(str) => {
-            if let Ok(val) = serde_json::from_str(&str) {
-                *cfg = val;
-            }
+    info!("Scheduling async load of {}", cfg_path.display());
+
+    // Start background task to read config file without blocking startup/splash.
+    let pool = AsyncComputeTaskPool::get();
+    let cfg_path_clone = cfg_path.clone();
+    let task = pool.spawn(async move {
+        match std::fs::read_to_string(&cfg_path_clone) {
+            Ok(s) => serde_json::from_str::<ClientSettings>(&s).ok(),
+            Err(_) => None,
         }
-        Err(err) => {
-            debug!("Skip loading {}: {err}", cfg_path.display());
+    });
+
+    commands.insert_resource(ClientSettingsLoadTask(task));
+}
+
+fn poll_settings_load(
+    mut cfg: ResMut<ClientSettings>,
+    mut maybe_task: Option<ResMut<ClientSettingsLoadTask>>,
+    mut commands: Commands,
+) {
+    if let Some(mut task_res) = maybe_task {
+        if task_res.0.is_finished() {
+            if let Some(polled) = futures_lite::future::block_on(poll_once(&mut task_res.0)) {
+                if let Some(val) = polled {
+                    *cfg = val;
+                    info!("Client settings loaded asynchronously");
+                }
+            }
+            commands.remove_resource::<ClientSettingsLoadTask>();
         }
     }
 }
@@ -64,7 +90,8 @@ pub fn build_plugin(app: &mut App) {
     app.insert_resource(ClientSettings::default());
     app.register_type::<ClientSettings>();
 
-    app.add_systems(PreStartup, on_app_init); // load settings
+    app.add_systems(PreStartup, on_app_init); // schedule async load of settings
+    app.add_systems(Startup, poll_settings_load); // apply when ready
     app.add_systems(Last, on_app_exit); // save settings
 }
 
