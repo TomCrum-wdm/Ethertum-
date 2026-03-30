@@ -29,9 +29,68 @@ pub(crate) fn as_mut<T>(v: &T) -> &mut T {
 // you need mutable access without invoking undefined behaviour.
 // Example: `let mut g = lock_arc(&arc_mutex);` then use `*g`.
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::ops::{Deref, DerefMut};
+use std::cell::RefCell;
 
-pub fn lock_arc<T>(a: &Arc<Mutex<T>>) -> MutexGuard<'_, T> {
-    a.lock().expect("lock_arc: failed to acquire mutex")
+thread_local! {
+    // keep a small stack of acquired lock addresses per thread for simple ordering checks
+    static LOCK_STACK: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+}
+
+pub struct TrackedMutexGuard<'a, T> {
+    inner: MutexGuard<'a, T>,
+    addr: usize,
+}
+
+impl<'a, T> Deref for TrackedMutexGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<'a, T> DerefMut for TrackedMutexGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.inner
+    }
+}
+
+impl<'a, T> Drop for TrackedMutexGuard<'a, T> {
+    fn drop(&mut self) {
+        // pop from thread-local stack
+        LOCK_STACK.with(|s| {
+            let mut v = s.borrow_mut();
+            if let Some(last) = v.pop() {
+                if last != self.addr {
+                    // best-effort cleanup on mismatch
+                    debug!("lock order stack mismatch: expected {:x}, got {:x}", last, self.addr);
+                }
+            }
+        });
+    }
+}
+
+/// Thread-safe locking helper for Arc<Mutex<T>> resources.
+/// Returns a tracked guard which logs potential lock-order inversions in debug builds.
+pub fn lock_arc<T>(a: &Arc<Mutex<T>>) -> TrackedMutexGuard<'_, T> {
+    let addr = Arc::as_ptr(a) as usize;
+    // simple check: if previous locked addr is greater than current, warn about potential inversion
+    LOCK_STACK.with(|s| {
+        let v = s.borrow();
+        if let Some(&prev) = v.last() {
+            if prev > addr {
+                warn!("possible lock-order inversion: prev=0x{:x} current=0x{:x}", prev, addr);
+            }
+        }
+    });
+
+    let guard = a.lock().expect("lock_arc: failed to acquire mutex");
+
+    LOCK_STACK.with(|s| {
+        s.borrow_mut().push(addr);
+    });
+
+    TrackedMutexGuard { inner: guard, addr }
 }
 
 #[allow(clippy::mut_from_ref)]

@@ -257,10 +257,15 @@ fn chunks_detect_load_and_unload(
         let tx = tx_chunk_load.clone();
             // clone `world_name_capture` per task so we don't move the outer capture
             let world_name_value = world_name_capture.clone();
-            let task = AsyncComputeTaskPool::get().spawn(async move {
+
+            // TEMPORARY: run world generation serially on the main thread for quick startup test.
+            // Set to `false` to restore async spawning. This change is intended for fast A/B testing
+            // to determine whether concurrent world generation is causing the startup hang.
+            let serial_worldgen = true;
+
+            if serial_worldgen {
                 // Protect generation code from panics to avoid crashing the app.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // info!("Load Chunk: {:?}", chunkpos);
                     let mut chunk = Chunk::new(chunkpos);
 
                     // Try to load from world save first. If not present, generate.
@@ -287,9 +292,42 @@ fn chunks_detect_load_and_unload(
                 if let Err(err) = result {
                     warn!("Chunk generation panicked at {:?}", err);
                 }
-            });
-        task.detach();
-        chunks_loading.insert(chunkpos);
+                chunks_loading.insert(chunkpos);
+            } else {
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    // Protect generation code from panics to avoid crashing the app.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        // info!("Load Chunk: {:?}", chunkpos);
+                        let mut chunk = Chunk::new(chunkpos);
+
+                        // Try to load from world save first. If not present, generate.
+                        let loaded = super::chunk_storage::load_chunk_from_world(
+                            &mut chunk,
+                            world_name_value.as_deref(),
+                            seed_capture,
+                        );
+                        if !loaded {
+                            super::worldgen::generate_chunk_with_params(
+                                &mut chunk,
+                                terrain_mode_capture,
+                                planet_center_capture,
+                                planet_radius_capture,
+                                shell_thickness_capture,
+                            );
+                        }
+
+                        if tx.send(chunk).is_err() {
+                            warn!("Chunk loading channel closed");
+                        }
+                    }));
+
+                    if let Err(err) = result {
+                        warn!("Chunk generation panicked at {:?}", err);
+                    }
+                });
+                task.detach();
+                chunks_loading.insert(chunkpos);
+            }
     });
 
     while let Ok(chunk) = rx_chunk_load.try_recv() {
