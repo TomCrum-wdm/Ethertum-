@@ -134,7 +134,8 @@ impl Plugin for UiPlugin {
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
             .add_systems(Update, apply_sys_font_system)
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
-            .add_systems(Update, sync_camera_render_effects_system)
+            // Avoid enabling heavy post-processing before entering a world on Android.
+            .add_systems(Update, sync_camera_render_effects_system.run_if(condition::in_world))
             .add_systems(Update, items::flush_inventory_ui_ops.run_if(condition::in_world))
             .add_systems(
                 EguiPrimaryContextPass,
@@ -411,52 +412,24 @@ fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
 
     #[cfg(target_os = "android")]
     {
-        // Android path: keep deferred features aligned with material shaders.
+        // Android startup path: keep camera minimal to reduce first-frame startup pressure.
+        // World-specific effects are applied later by sync_camera_render_effects_system when in-world.
         let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
         commands.insert_resource(crate::client::client_world::SkyboxCubemap {
             is_loaded: false,
             image_handle: skybox_image.clone(),
         });
 
-        let mut camera_entity = commands.spawn((
+        commands.spawn((
             Camera3d::default(),
             Camera {
                 order: 0,
                 ..default()
             },
-            bevy::render::view::Hdr,
-            bevy::core_pipeline::prepass::DepthPrepass,
-            bevy::core_pipeline::prepass::DeferredPrepass,
-            bevy::core_pipeline::prepass::NormalPrepass,
-            DistanceFog {
-                color: Color::srgb(0.62, 0.72, 0.84),
-                ..default()
-            },
-            Skybox {
-                image: skybox_image.clone(),
-                brightness: 1000.0,
-                ..Default::default()
-            },
-            EnvironmentMapLight {
-                diffuse_map: skybox_image.clone(),
-                specular_map: skybox_image.clone(),
-                intensity: 1000.0,
-                ..Default::default()
-            },
             CharacterControllerCamera,
             Name::new("Camera"),
             Msaa::Off,
         ));
-
-        camera_entity
-            .insert(ScreenSpaceReflections::default())
-            .insert(Fxaa::default())
-            .insert(Tonemapping::TonyMcMapface)
-            .insert(Bloom::default())
-            .insert(bevy::light::VolumetricFog {
-                ambient_intensity: 0.,
-                ..default()
-            });
     }
 }
 
