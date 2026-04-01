@@ -32,9 +32,16 @@ impl Plugin for ClientGamePlugin {
                 //app.insert_resource(AtmosphereModel::default());
             }
             
-            // Voxel materials currently provide deferred shaders; forcing forward on Android
-            // bypasses those code paths and breaks terrain texture sampling.
-            app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+            #[cfg(target_os = "android")]
+            {
+                // Favor startup reliability on Android: keep opaque path forward during
+                // app boot to avoid deferred pipeline pressure before first frame.
+                app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::forward());
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+            }
 
             #[cfg(target_os = "android")]
             {
@@ -46,7 +53,8 @@ impl Plugin for ClientGamePlugin {
             // app.add_plugins(TemporalAntiAliasPlugin);
             // app.insert_resource(AmbientLight { brightness: 0.05, ..default() });
         }
-        // .obj model loader.
+        // .obj model loader is mainly used on desktop/editor paths.
+        #[cfg(not(target_os = "android"))]
         app.add_plugins(bevy_obj::ObjPlugin);
         app.insert_resource(GlobalVolume::new(bevy::audio::Volume::Linear(1.0))); // Audio GlobalVolume
         
