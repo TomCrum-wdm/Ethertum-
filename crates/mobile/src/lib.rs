@@ -69,20 +69,14 @@ fn main() {
     #[cfg(target_os = "android")]
     boot_log("panic hook installed");
 
-    // On Android, avoid forcing a monitor-based fullscreen mode during startup.
-    // Some devices can stall before first frame when fullscreen monitor selection
-    // is requested too early in NativeActivity initialization.
-    let primary_window = if cfg!(target_os = "android") {
-        Window {
-            resizable: false,
-            ..default()
-        }
-    } else {
-        Window {
-            resizable: false,
-            mode: bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary),
-            ..default()
-        }
+    let mut primary_window = Window {
+        resizable: false,
+        mode: if cfg!(target_os = "android") {
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary)
+        } else {
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Primary)
+        },
+        ..default()
     };
 
     #[cfg(target_os = "android")]
