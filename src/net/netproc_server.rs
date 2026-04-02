@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bevy::{prelude::*, platform::collections::HashSet};
 use bevy_renet::{
     renet::{ConnectionConfig, DefaultChannel, RenetServer, ServerEvent},
@@ -173,8 +171,8 @@ pub fn server_sys(
                         server.send_packet_disconnect(client_id, format!("Player {} already logged in", &username));
                         continue;
                     }
-                    // 模拟登录验证
-                    std::thread::sleep(Duration::from_millis(800));
+                    // Keep login handling non-blocking on the main thread.
+                    // Previous simulated delay used thread::sleep here and could stall frame updates.
 
                     // Spawn player entity at a safe default height above ground
                     let entity_id = EntityId::from_server(cmds.spawn(Transform::from_translation(Vec3::new(0.0, 64.0, 0.0))).id());

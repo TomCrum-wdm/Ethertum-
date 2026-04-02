@@ -29,7 +29,7 @@ fn client_settings_path() -> PathBuf {
     PathBuf::from(CLIENT_SETTINGS_FILE)
 }
 
-fn on_app_init(mut cfg: ResMut<ClientSettings>, mut commands: Commands) {
+fn on_app_init(mut commands: Commands) {
     let cfg_path = client_settings_path();
     info!("Scheduling async load of {}", cfg_path.display());
 
@@ -48,16 +48,16 @@ fn on_app_init(mut cfg: ResMut<ClientSettings>, mut commands: Commands) {
 
 fn poll_settings_load(
     mut cfg: ResMut<ClientSettings>,
-    mut maybe_task: Option<ResMut<ClientSettingsLoadTask>>,
+    maybe_task: Option<ResMut<ClientSettingsLoadTask>>,
     mut commands: Commands,
 ) {
     if let Some(mut task_res) = maybe_task {
-        if task_res.0.is_finished() {
-            if let Some(polled) = futures_lite::future::block_on(poll_once(&mut task_res.0)) {
-                if let Some(val) = polled {
-                    *cfg = val;
-                    info!("Client settings loaded asynchronously");
-                }
+        // poll_once + block_on here performs exactly one poll and returns immediately,
+        // so it won't stall the main thread while waiting for completion.
+        if let Some(polled) = futures_lite::future::block_on(poll_once(&mut task_res.0)) {
+            if let Some(val) = polled {
+                *cfg = val;
+                info!("Client settings loaded asynchronously");
             }
             commands.remove_resource::<ClientSettingsLoadTask>();
         }
@@ -91,7 +91,7 @@ pub fn build_plugin(app: &mut App) {
     app.register_type::<ClientSettings>();
 
     app.add_systems(PreStartup, on_app_init); // schedule async load of settings
-    app.add_systems(Startup, poll_settings_load); // apply when ready
+    app.add_systems(Update, poll_settings_load); // apply when ready
     app.add_systems(Last, on_app_exit); // save settings
 }
 

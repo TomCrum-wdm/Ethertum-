@@ -216,21 +216,19 @@ pub fn ui_serverlist(
                                 util::current_timestamp_millis(),
                             )
                         });
-                        if task.is_finished() {
-                            if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
-                                match polled {
-                                    Ok(r) => {
-                                        ui_server_info.motd = r.motd;
-                                        ui_server_info.num_players_limit = r.num_player_limit;
-                                        ui_server_info.num_players_online = r.num_player_online;
-                                        ui_server_info.gameplay_addr = r.game_addr;
-                                        ui_server_info.ping = (util::current_timestamp_millis() - *time) as u32;
-                                    }
-                                    Err(err) => {
-                                        info!("Failed to access server status: {}", err);
-                                        ui_server_info.ping = 0;
-                                        ui_server_info.motd = err.to_string();
-                                    }
+                        if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
+                            match polled {
+                                Ok(r) => {
+                                    ui_server_info.motd = r.motd;
+                                    ui_server_info.num_players_limit = r.num_player_limit;
+                                    ui_server_info.num_players_online = r.num_player_online;
+                                    ui_server_info.gameplay_addr = r.game_addr;
+                                    ui_server_info.ping = (util::current_timestamp_millis() - *time) as u32;
+                                }
+                                Err(err) => {
+                                    info!("Failed to access server status: {}", err);
+                                    ui_server_info.ping = 0;
+                                    ui_server_info.motd = err.to_string();
                                 }
                             }
                             is_refreshing = false;
@@ -323,10 +321,8 @@ pub fn ui_localsaves(
 
         // If loading task finished, collect result into cache
         if let Some(task) = saves_loading_task.as_mut() {
-            if task.is_finished() {
-                if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
-                    *saves_cache = Some(polled);
-                }
+            if let Some(polled) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
+                *saves_cache = Some(polled);
                 *saves_loading_task = None;
             }
         }
@@ -479,7 +475,6 @@ pub fn ui_localsaves(
         }
     });
 }
-    
 
 #[derive(Default, Debug, PartialEq)]
 pub enum Difficulty {

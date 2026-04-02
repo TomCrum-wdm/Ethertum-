@@ -63,8 +63,19 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
-        // Enable integrated local server on all platforms, including Android.
-        app.add_plugins(IntegratedServerPlugin);
+        #[cfg(target_os = "android")]
+        let enable_integrated_server = matches!(
+            std::env::var("ETHERTIA_ANDROID_INTEGRATED_SERVER"),
+            Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")
+        );
+        #[cfg(not(target_os = "android"))]
+        let enable_integrated_server = true;
+
+        if enable_integrated_server {
+            app.add_plugins(IntegratedServerPlugin);
+        } else {
+            info!("IntegratedServerPlugin disabled on Android by default");
+        }
         
         // ClientInfo
         app.insert_resource(ClientInfo::default());

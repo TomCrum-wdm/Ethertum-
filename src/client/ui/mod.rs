@@ -68,9 +68,10 @@ fn spawn_sys_font_loader(sys_font: Res<SysFontBytes>) {
 
 // Apply loaded system font when available by merging and calling set_fonts on the Egui context.
 fn apply_sys_font_system(sys_font: Res<SysFontBytes>, mut contexts: EguiContexts) {
-    let maybe_bytes = {
-        let lock = sys_font.0.lock().unwrap();
-        lock.clone()
+    let maybe_bytes = match sys_font.0.try_lock() {
+        Ok(lock) => lock.clone(),
+        // Skip this frame if another thread is writing font bytes.
+        Err(_) => return,
     };
     if let Some(bytes) = maybe_bytes {
         // Rebuild FontDefinitions similar to initial setup but include the loaded noto fallback.
@@ -101,7 +102,7 @@ fn apply_sys_font_system(sys_font: Res<SysFontBytes>, mut contexts: EguiContexts
         }
 
         // Clear stored bytes so we don't reapply repeatedly
-        if let Ok(mut lock) = sys_font.0.lock() {
+        if let Ok(mut lock) = sys_font.0.try_lock() {
             *lock = None;
         }
     }

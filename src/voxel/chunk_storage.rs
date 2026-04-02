@@ -37,7 +37,20 @@ impl Into<Vox> for SimpleVox {
     fn into(self) -> Vox {
         let mut vx = Vox::default();
         vx.tex_id = self.tex_id;
-        vx.shape_id = unsafe { std::mem::transmute::<u8, VoxShape>(self.shape_id) };
+        vx.shape_id = match self.shape_id {
+            x if x == VoxShape::Isosurface as u8 => VoxShape::Isosurface,
+            x if x == VoxShape::Cube as u8 => VoxShape::Cube,
+            x if x == VoxShape::Leaves as u8 => VoxShape::Leaves,
+            x if x == VoxShape::Grass as u8 => VoxShape::Grass,
+            x if x == VoxShape::SlabYMin as u8 => VoxShape::SlabYMin,
+            x if x == VoxShape::SlabYMax as u8 => VoxShape::SlabYMax,
+            x if x == VoxShape::SlabXMin as u8 => VoxShape::SlabXMin,
+            x if x == VoxShape::SlabXMax as u8 => VoxShape::SlabXMax,
+            x if x == VoxShape::SlabZMin as u8 => VoxShape::SlabZMin,
+            x if x == VoxShape::SlabZMax as u8 => VoxShape::SlabZMax,
+            x if x == VoxShape::Fence as u8 => VoxShape::Fence,
+            _ => VoxShape::Isosurface,
+        };
         // unpack light
         let sky = (self.light >> 12) as u16;
         let r = ((self.light >> 8) & 0xF) as u16;
