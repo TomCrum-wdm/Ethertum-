@@ -48,15 +48,14 @@ fn main() {
 
     #[cfg(target_os = "android")]
     {
-        // Prefer GLES by default on Android. Some devices stall during Vulkan init
-        // and never reach the first frame (stuck on splash). Keep explicit override.
+        // Keep backend selection adaptive on Android to reduce startup crashes on devices
+        // with incomplete Vulkan support. Respect explicit user/runtime override if provided.
         match std::env::var("WGPU_BACKEND") {
             Ok(current) if !current.trim().is_empty() => {
                 boot_log(&format!("keep WGPU_BACKEND={}", current));
             }
             _ => {
-                std::env::set_var("WGPU_BACKEND", "gl");
-                boot_log("WGPU_BACKEND not set, forcing WGPU_BACKEND=gl on Android");
+                boot_log("WGPU_BACKEND not set, using runtime default backend selection");
             }
         }
     }

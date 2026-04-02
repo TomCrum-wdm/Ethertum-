@@ -61,6 +61,9 @@ bevy = { version = "0.17.2", default-features = false, features = [
     "sysinfo_plugin",
     "tonemapping_luts",
     "vorbis",
+    "webgl2",
+    "x11",
+    "wayland",
     "zstd_rust"
 ] }
 ethertia = { path = "../..", default-features = false }
@@ -115,6 +118,9 @@ bevy = { version = "0.17.2", default-features = false, features = [
     "sysinfo_plugin",
     "tonemapping_luts",
     "vorbis",
+    "webgl2",
+    "x11",
+    "wayland",
     "zstd_rust"
 ] }
 
