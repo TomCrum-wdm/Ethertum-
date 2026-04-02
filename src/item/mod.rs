@@ -82,11 +82,32 @@ impl Plugin for ItemPlugin {
         app.insert_resource(Items::default());
         // app.insert_resource(Registry::default());
 
-        app.add_systems(Startup, setup_items);
+        // On Android, defer heavy startup registration work by a couple of frames
+        // to ensure the first frame can be presented and system splash can exit.
+        app.add_systems(Update, setup_items_deferred);
         app.add_systems(bevy_egui::EguiPrimaryContextPass, setup_items_egui);
 
         // app.add_systems(PostStartup, bake_items);
     }
+}
+
+fn setup_items_deferred(
+    mut initialized: Local<bool>,
+    mut defer_frames: Local<u8>,
+    items: ResMut<Items>,
+    asset_server: Res<AssetServer>,
+) {
+    if *initialized {
+        return;
+    }
+
+    if cfg!(target_os = "android") && *defer_frames < 2 {
+        *defer_frames += 1;
+        return;
+    }
+
+    setup_items(items, asset_server);
+    *initialized = true;
 }
 
 #[derive(Resource, Default)]

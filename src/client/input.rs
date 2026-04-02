@@ -49,7 +49,9 @@ impl Default for TouchStickState {
 }
 
 pub fn init(app: &mut App) {
-    app.add_systems(Startup, super::input::input_setup);
+    // Defer initial input-map entity spawn slightly on Android so first frame
+    // presentation is not blocked by startup work aggregation.
+    app.add_systems(Update, super::input::input_setup_deferred);
     app.add_systems(Update, super::input::input_handle);
     app.add_plugins(InputManagerPlugin::<InputAction>::default());
     app.insert_resource(TouchStickState::default());
@@ -228,6 +230,24 @@ impl InputAction {
 
 pub fn input_setup(mut cmds: Commands) {
     cmds.spawn(InputAction::default_input_map());
+}
+
+fn input_setup_deferred(
+    mut initialized: Local<bool>,
+    mut defer_frames: Local<u8>,
+    cmds: Commands,
+) {
+    if *initialized {
+        return;
+    }
+
+    if cfg!(target_os = "android") && *defer_frames < 2 {
+        *defer_frames += 1;
+        return;
+    }
+
+    input_setup(cmds);
+    *initialized = true;
 }
 
 pub fn input_handle(

@@ -46,11 +46,32 @@ impl Plugin for ServerNetworkPlugin {
             ..default()
         }));
 
-        app.add_systems(Startup, bind_server_endpoint);
+        // Defer endpoint bind on Android to avoid concentrating startup work before
+        // first frame. This keeps behavior identical while shifting timing.
+        app.add_systems(Update, bind_server_endpoint_deferred);
         app.add_systems(Update, server_sys);
 
         // app.add_systems(Update, ui_server_net);
     }
+}
+
+fn bind_server_endpoint_deferred(
+    mut initialized: Local<bool>,
+    mut defer_frames: Local<u8>,
+    cmds: Commands,
+    cfg: Res<ServerSettings>,
+) {
+    if *initialized {
+        return;
+    }
+
+    if cfg!(target_os = "android") && *defer_frames < 2 {
+        *defer_frames += 1;
+        return;
+    }
+
+    bind_server_endpoint(cmds, cfg);
+    *initialized = true;
 }
 
 fn bind_server_endpoint(mut cmds: Commands, cfg: Res<ServerSettings>) {

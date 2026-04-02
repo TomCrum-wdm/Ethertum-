@@ -6,6 +6,7 @@ pub mod serverlist;
 mod settings;
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub mod prelude {
     pub use super::items::{ui_inventory, ui_item_stack};
@@ -239,8 +240,10 @@ pub enum CurrentUI {
 }
 
 // Shared UI runtime state that may be touched from multiple systems.
-static UI_WINDOW_SIZE: Mutex<Vec2> = Mutex::new(Vec2::ZERO);
-static UI_SAFE_TOP: Mutex<f32> = Mutex::new(0.0);
+// Use atomics for simple numeric metrics to avoid lock waits during startup.
+static UI_WINDOW_SIZE_X_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+static UI_WINDOW_SIZE_Y_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+static UI_SAFE_TOP_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
 
 struct UiSfxState {
     hovered_id: egui::Id,
@@ -268,20 +271,17 @@ static UI_SFX_STATE: Mutex<UiSfxState> = Mutex::new(UiSfxState {
 });
 
 pub fn set_window_size(size: Vec2) {
-    if let Ok(mut v) = UI_WINDOW_SIZE.lock() {
-        *v = size;
-    }
+    UI_WINDOW_SIZE_X_BITS.store(size.x.to_bits(), Ordering::Relaxed);
+    UI_WINDOW_SIZE_Y_BITS.store(size.y.to_bits(), Ordering::Relaxed);
 }
 
 pub fn set_ui_safe_top(v: f32) {
-    if let Ok(mut top) = UI_SAFE_TOP.lock() {
-        *top = v.max(0.0);
-    }
+    UI_SAFE_TOP_BITS.store(v.max(0.0).to_bits(), Ordering::Relaxed);
 }
 
 pub fn ui_safe_top() -> f32 {
     if cfg!(target_os = "android") {
-        UI_SAFE_TOP.lock().map(|v| *v).unwrap_or(42.0).max(32.0)
+        f32::from_bits(UI_SAFE_TOP_BITS.load(Ordering::Relaxed)).max(32.0)
     } else {
         0.0
     }
@@ -297,7 +297,10 @@ pub fn new_egui_window(title: &str) -> egui::Window<'_> {
         .anchor(Align2::CENTER_CENTER, [0., 0.])
         .collapsible(false);
 
-    let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
+    let window_size = Vec2::new(
+        f32::from_bits(UI_WINDOW_SIZE_X_BITS.load(Ordering::Relaxed)),
+        f32::from_bits(UI_WINDOW_SIZE_Y_BITS.load(Ordering::Relaxed)),
+    );
 
     if cfg!(target_os = "android") {
         let safe_top = ui_safe_top();
@@ -669,7 +672,7 @@ fn ui_example_system(
 }
 
 fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, _limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
-    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
         if sfx_state.back_requested {
             sfx_state.back_requested = false;
             cli.curr_ui = CurrentUI::MainMenu;
@@ -698,7 +701,7 @@ fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, _limbo_played: L
     //     });
     // }
 
-    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
         if sfx_state.hovered_id != egui::Id::NULL && sfx_state.hovered_id != sfx_state.last_hovered_id {
             cmds.spawn(
                 AudioPlayer::<AudioSource>(asset_server.load("sounds/ui/button.ogg"))
@@ -748,7 +751,7 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                                 sfx_play(ui.selectable_label(false, "⬅Back"))
                             };
                             if back_resp.clicked() {
-                                if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+                                if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
                                     sfx_state.back_requested = true;
                                 }
                             }
@@ -785,7 +788,7 @@ pub trait UiExtra {
 }
 
 pub fn sfx_play(resp: Response) -> Response {
-    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
         if resp.hovered() || resp.gained_focus() {
             sfx_state.hovered_id = resp.id;
         }
