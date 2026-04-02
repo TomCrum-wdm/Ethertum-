@@ -844,55 +844,54 @@ impl ClientChunkSystem {
 
         let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
 
-        let chunkpos;
+        let chunkpos = {
+            let mut chunk = crate::util::lock_arc(&chunkptr);
+            chunk.chunkptr_weak = Arc::downgrade(&chunkptr);
+            chunk.chunkpos
+        };
+
+        // Build neighbor cache first without taking nested chunk->neighbor locks.
+        let mut neighbor_refs: Vec<(usize, ChunkPtr)> = Vec::new();
         {
             let mut chunk = crate::util::lock_arc(&chunkptr);
-            chunkpos = chunk.chunkpos;
-            chunk.chunkptr_weak = Arc::downgrade(&chunkptr);
-
-            // let mut neighbors_completed = Vec::new();
-
             for neib_idx in 0..Chunk::NEIGHBOR_DIR.len() {
                 let neib_dir = Chunk::NEIGHBOR_DIR[neib_idx];
                 let neib_chunkpos = chunkpos + neib_dir * Chunk::LEN;
 
-                // set neighbor_chunks cache
-                chunk.neighbor_chunks[neib_idx] = {
-                    if let Some(neib_chunkptr) = self.get_chunk(neib_chunkpos).cloned() {
-                        let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
+                if let Some(neib_chunkptr) = self.get_chunk(neib_chunkpos).cloned() {
+                    chunk.neighbor_chunks[neib_idx] = Some(Arc::downgrade(&neib_chunkptr));
+                    neighbor_refs.push((neib_idx, neib_chunkptr));
+                } else {
+                    chunk.neighbor_chunks[neib_idx] = None;
+                }
+            }
+        }
 
-                        // update neighbor's `neighbor_chunk`
-                        neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = Some(Arc::downgrade(&chunkptr));
+        // Then best-effort link neighbors back to this chunk using non-blocking locks
+        // to avoid lock-order inversion deadlocks.
+        for (neib_idx, neib_chunkptr) in neighbor_refs {
+            let Ok(mut neib_chunk) = neib_chunkptr.try_lock() else {
+                continue;
+            };
 
-                            if neib_chunk.is_neighbors_all_loaded() && !neib_chunk.is_populated {
-                            // neighbors_completed.push(neib_chunk.chunkpos);
-                            neib_chunk.is_populated = true;
-                            super::worldgen::populate_chunk(&mut *neib_chunk); // todo: ChunkGen Thread
+            neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = Some(Arc::downgrade(&chunkptr));
 
-                            self.mark_chunk_remesh(neib_chunk.chunkpos);
+            if neib_chunk.is_neighbors_all_loaded() && !neib_chunk.is_populated {
+                neib_chunk.is_populated = true;
+                super::worldgen::populate_chunk(&mut *neib_chunk);
 
-                            // fixed: chunk border mesh outdated issue due to population update.
-                            for (idx, nneib) in neib_chunk.neighbor_chunks.iter().enumerate() {
-                                if nneib.is_some() {
-                                    self.mark_chunk_remesh(neib_chunk.chunkpos + Chunk::NEIGHBOR_DIR[idx] * Chunk::LEN);
-                                }
-                            }
-                        }
-                        
-                        Some(Arc::downgrade(&neib_chunkptr))
-                    } else {
-                        None
+                self.mark_chunk_remesh(neib_chunk.chunkpos);
+
+                // fixed: chunk border mesh outdated issue due to population update.
+                for (idx, nneib) in neib_chunk.neighbor_chunks.iter().enumerate() {
+                    if nneib.is_some() {
+                        self.mark_chunk_remesh(neib_chunk.chunkpos + Chunk::NEIGHBOR_DIR[idx] * Chunk::LEN);
                     }
                 }
             }
-
-            // if chunk.is_neighbors_complete() {
-            self.mark_chunk_remesh(chunkpos);
-            // }
-            // for cp in neighbors_completed {
-            //     self.mark_chunk_remesh(cp);
-            // }
         }
+
+        self.mark_chunk_remesh(chunkpos);
 
         self.chunks.insert(chunkpos, chunkptr);
 
@@ -905,20 +904,26 @@ impl ClientChunkSystem {
     pub fn despawn_chunk(&mut self, chunkpos: IVec3, cmds: &mut Commands) -> Option<ChunkPtr> {
         let chunk = self.chunks.remove(&chunkpos)?;
 
-        let entity = {
-            let mut guard = crate::util::lock_arc(&chunk);
+        // Collect neighbor pointers first, then update them without nested locks.
+        let (entity, neighbor_refs) = {
+            let guard = crate::util::lock_arc(&chunk);
+            let mut refs = Vec::new();
 
-            // update neighbors' `neighbors_chunk`
             for neib_idx in 0..Chunk::NEIGHBOR_DIR.len() {
                 if let Some(neib_chunkptr) = guard.get_chunk_neib(neib_idx) {
-                    let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
-
-                    neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = None;
+                    refs.push((neib_idx, neib_chunkptr));
                 }
             }
 
-            guard.entity
+            (guard.entity, refs)
         };
+
+        for (neib_idx, neib_chunkptr) in neighbor_refs {
+            if let Ok(mut neib_chunk) = neib_chunkptr.try_lock() {
+                neib_chunk.neighbor_chunks[Chunk::neighbor_idx_opposite(neib_idx)] = None;
+            }
+        }
+
         cmds.entity(entity).despawn();
 
         Some(chunk)

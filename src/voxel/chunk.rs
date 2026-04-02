@@ -64,7 +64,9 @@ impl Chunk {
             Some(*self.at_voxel(relpos))
         } else {
             let neib_chunkptr = self.get_chunk_rel(relpos)?;
-            let guard = crate::util::lock_arc(&neib_chunkptr);
+            // Avoid blocking cross-chunk lock waits: if neighbor is busy, skip this sample.
+            // Callers that use `*_or_default` will gracefully fall back.
+            let guard = neib_chunkptr.try_lock().ok()?;
             Some(*guard.at_voxel(Chunk::as_localpos(relpos)))
         }
     }
@@ -77,7 +79,8 @@ impl Chunk {
         }
 
         let neib_chunkptr = self.get_chunk_rel(relpos)?;
-        let mut neib_chunk = crate::util::lock_arc(&neib_chunkptr);
+        // Avoid potential deadlocks from lock-order inversion across adjacent chunks.
+        let mut neib_chunk = neib_chunkptr.try_lock().ok()?;
         let vox = neib_chunk.at_voxel_mut(Chunk::as_localpos(relpos));
         visitor(vox);
         Some(*vox)
