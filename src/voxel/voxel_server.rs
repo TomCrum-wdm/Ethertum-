@@ -63,32 +63,44 @@ fn chunks_load(
 
             let tx = tx_chunks_loading.clone();
 
-            let terrain_mode = crate::client::settings::ClientSettings::default().terrain_mode;
-            let task = AsyncComputeTaskPool::get().spawn(async move {
-                // Keep chunk generation off the main thread, and avoid the wrapper
-                // that may touch ECS resources on some builds.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // On Android avoid spawning worldgen on async compute pool because
+            // generation can (indirectly) touch engine resources not safe on
+            // arbitrary threads. Run generation synchronously on the caller
+            // thread as a mitigation. Other platforms keep async spawning.
+            #[cfg(target_os = "android")]
+            {
+                // info!("Load Chunk (sync Android): {:?}", chunkpos);
+                let mut chunk = Chunk::new(chunkpos);
+                // TODO: consider passing real settings from caller instead of default
+                let settings = crate::client::settings::ClientSettings::default();
+                super::worldgen::generate_chunk(&mut chunk, &settings);
+
+                let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
+                if tx.send((chunkpos, chunkptr)).is_err() {
+                    warn!("Server chunk loading channel closed");
+                }
+            }
+
+            #[cfg(not(target_os = "android"))]
+            {
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    // info!("Load Chunk: {:?}", chunkpos);
                     let mut chunk = Chunk::new(chunkpos);
-                    super::worldgen::generate_chunk_with_params(
-                        &mut chunk,
-                        terrain_mode,
-                        IVec3::new(0, 512, 0),
-                        512.0,
-                        96.0,
-                    );
+
+                    // 获取全局ClientSettings
+                    // TODO: 这里应由上层系统传入settings参数，临时用默认值防止编译错误
+                    let settings = crate::client::settings::ClientSettings::default();
+                    super::worldgen::generate_chunk(&mut chunk, &settings);
 
                     let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
                     if tx.send((chunkpos, chunkptr)).is_err() {
                         warn!("Server chunk loading channel closed");
                     }
-                }));
+                });
 
-                if let Err(err) = result {
-                    warn!("Server chunk generation panicked at {:?}: {:?}", chunkpos, err);
-                }
-            });
+                task.detach();
+            }
 
-            task.detach();
             chunks_loading.insert(chunkpos);
 
             info!("ChunkLoad Enqueue {} / {}", chunk_sys.num_chunks(), chunkpos);
