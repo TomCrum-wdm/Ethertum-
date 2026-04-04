@@ -722,7 +722,6 @@ checksum = "342f7e9335416dc98642d5747c4ed8a6ad9f7244a36d5b2b7a1b7910e4d8f524"
 dependencies = [
  "bevy_dylib",
  "bevy_internal 0.17.2",
- "tracing",
 ]
 
 [[package]]
@@ -1006,7 +1005,6 @@ dependencies = [
  "downcast-rs 2.0.2",
  "log",
  "thiserror 2.0.16",
- "tracing",
  "variadics_please",
  "wasm-bindgen",
  "web-sys",
@@ -1681,7 +1679,6 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.16",
- "tracing",
  "variadics_please",
 ]
 
@@ -2534,8 +2531,6 @@ dependencies = [
  "bevy_platform 0.17.2",
  "bevy_utils 0.17.2",
  "tracing",
- "tracing-chrome",
- "tracing-error",
  "tracing-log 0.2.0",
  "tracing-oslog 0.3.0",
  "tracing-subscriber",
@@ -3306,7 +3301,6 @@ dependencies = [
  "naga 26.0.0",
  "nonmax",
  "offset-allocator",
- "profiling",
  "send_wrapper",
  "smallvec",
  "thiserror 2.0.16",
@@ -9040,7 +9034,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
 dependencies = [
  "profiling-procmacros",
- "tracing",
 ]
 
 [[package]]
@@ -10436,17 +10429,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tracing-chrome"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0a738ed5d6450a9fb96e86a23ad808de2b727fd1394585da5cdd6788ffe724"
-dependencies = [
- "serde_json",
- "tracing-core",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "tracing-core"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10454,16 +10436,6 @@ checksum = "b9d12581f227e93f094d3af2ae690a574abb8a2b9b7a96e7cfe9647b2b617678"
 dependencies = [
  "once_cell",
  "valuable",
-]
-
-[[package]]
-name = "tracing-error"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d686ec1c0f384b1277f097b2f279a2ecc11afe8c133c1aabf036a27cb4cd206e"
-dependencies = [
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
