@@ -4,7 +4,9 @@ use crate::prelude::*;
 use std::sync::atomic::Ordering;
 
 // naming VoxelUnit?: BlockState, Cell, Voxel or Vox?
-#[derive(Clone, Copy)]
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct Vox {
     pub tex_id: u16,
 
@@ -136,7 +138,7 @@ impl VoxTex {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
 pub struct VoxLight {
     // 4*u4 channel: Sky, R, G, B
     light: u16,

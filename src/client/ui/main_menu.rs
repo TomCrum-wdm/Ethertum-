@@ -189,6 +189,8 @@ pub fn ui_pause_menu(
     mut player: ResMut<ClientPlayerInfo>,
     mut inv_ui_state: ResMut<super::items::InventoryUiState>,
     items: Option<Res<crate::item::Items>>,
+    time: Res<Time>,
+    mut last_save_feedback: Local<f32>,
     // mut net_client: ResMut<RenetClient>,
 ) {
     let Some(items) = items else {
@@ -218,10 +220,19 @@ pub fn ui_pause_menu(
                     cli.data().curr_ui = CurrentUI::Settings;
                 }
 
+                if ui.toggle_value(&mut false, "Save World").clicked() {
+                    cli.request_save_world();
+                    *last_save_feedback = time.elapsed_secs();
+                }
+
                 if ui.toggle_value(&mut false, "Quit").clicked() {
                     cli.exit_world();
                 }
             });
+
+            if *last_save_feedback > 0.0 && time.elapsed_secs() - *last_save_feedback < 2.0 {
+                ui.small("World save requested");
+            }
         });
 
     // return;

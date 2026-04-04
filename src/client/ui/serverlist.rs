@@ -17,6 +17,20 @@ use super::{sfx_play, ui_lr_panel, CurrentUI, UiExtra};
 
 use super::new_egui_window;
 
+fn format_age_secs(ts: i64) -> String {
+    let now = crate::util::current_timestamp().as_secs() as i64;
+    let dt = (now - ts).max(0);
+    if dt < 60 {
+        format!("{}s ago", dt)
+    } else if dt < 3600 {
+        format!("{}m ago", dt / 60)
+    } else if dt < 86400 {
+        format!("{}h ago", dt / 3600)
+    } else {
+        format!("{}d ago", dt / 86400)
+    }
+}
+
 pub fn ui_connecting_server(mut ctx: EguiContexts, mut cli: EthertiaClient, net_client: Option<ResMut<RenetClient>>) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -271,15 +285,31 @@ pub fn ui_serverlist(
 pub fn ui_localsaves(
     mut ctx: EguiContexts,
     mut cli: EthertiaClient,
-    mut idx_editing: Local<Option<usize>>,
     serv_cfg: Option<Res<ServerSettings>>,
+    mut worlds: Local<Vec<crate::voxel::LocalWorldInfo>>,
+    mut last_error: Local<String>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
 
+    match crate::voxel::list_worlds() {
+        Ok(list) => {
+            *worlds = list;
+            last_error.clear();
+        }
+        Err(err) => {
+            if worlds.is_empty() {
+                *last_error = err.to_string();
+            }
+        }
+    }
+
     new_egui_window("Local Worlds").show(ctx_mut, |ui| {
         let local_world_supported = serv_cfg.is_some();
+        let mut do_refresh = false;
+        let mut do_delete: Option<String> = None;
+        let mut do_play: Option<(String, u64)> = None;
 
         if !local_world_supported {
             ui.colored_label(Color32::YELLOW, "Local worlds are unavailable on this platform/runtime.");
@@ -287,58 +317,47 @@ pub fn ui_localsaves(
             ui.add_space(8.0);
         }
 
+        if !last_error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, format!("Error: {}", *last_error));
+            ui.add_space(6.0);
+        }
+
         ui_lr_panel(
             ui,
             false,
             |ui| {
                 if ui.btn_borderless("New World").clicked() {
-                    // cli.data().curr_ui = CurrentUI::LocalWorldNew;
+                    cli.data().curr_ui = CurrentUI::LocalWorldNew;
                 }
-                if ui.btn_borderless("Refresh").clicked() {}
+                if ui.btn_borderless("Refresh").clicked() {
+                    do_refresh = true;
+                }
+                if ui.btn_borderless("Back").clicked() {
+                    cli.data().curr_ui = CurrentUI::MainMenu;
+                }
             },
             |ui| {
-                for idx in 0..28 {
-                    let is_editing = idx_editing.is_some_and(|i| i == idx);
+                if worlds.is_empty() {
+                    ui.label("No local worlds yet. Click New World to create one.");
+                }
 
-                    // World Item
+                for world in worlds.iter() {
                     ui.group(|ui| {
-                        // Line1:
                         ui.horizontal(|ui| {
-                            // Left: Title
-                            ui.colored_label(Color32::WHITE, "World Name").on_hover_text(
-                                "Path: /Saves/Saa
-Size: 10.3 MiB
-Time Modified: 2024.02.01 11:20 AM
-Time Created: 2024.02.01 11:20 AM
-Inhabited: 10.3 hours",
-                            );
-                            // Right: Info
+                            ui.colored_label(Color32::WHITE, &world.name);
                             ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
-                                ui.label("3 days ago · 13 MB");
+                                ui.label(format!("{} · seed {}", format_age_secs(world.last_played), world.seed));
                             });
                         });
-                        // Line2:
-                        ui.horizontal(|ui| {
-                            // Left: Description
-                            ui.label("Survival · Cheats");
-                            // Right: Ops
-                            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
-                                if is_editing {
-                                    if ui.btn("✅").clicked() {
-                                        *idx_editing = None;
-                                    }
 
-                                    ui.btn("🗑").on_hover_text("Delete").clicked();
-                                } else {
-                                    if ui.btn("⛭").on_hover_text("Edit").clicked() {
-                                        *idx_editing = Some(idx);
-                                    }
-                                    if ui.btn("▶").on_hover_text("Play").clicked() {
-                                        if let Some(serv_cfg) = &serv_cfg {
-                                            // cli.enter_world();
-                                            cli.connect_server(format!("127.0.0.1:{}", serv_cfg.port));
-                                        }
-                                    }
+                        ui.horizontal(|ui| {
+                            ui.label("Persistent local world");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                                if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                    do_delete = Some(world.name.clone());
+                                }
+                                if ui.btn("▶").on_hover_text("Play world").clicked() {
+                                    do_play = Some((world.name.clone(), world.seed));
                                 }
                             });
                         });
@@ -346,6 +365,45 @@ Inhabited: 10.3 hours",
                 }
             },
         );
+
+        if do_refresh {
+            match crate::voxel::list_worlds() {
+                Ok(list) => {
+                    *worlds = list;
+                    last_error.clear();
+                }
+                Err(err) => {
+                    worlds.clear();
+                    *last_error = err.to_string();
+                }
+            }
+        }
+
+        if let Some(name) = do_delete {
+            match crate::voxel::delete_world(&name) {
+                Ok(()) => {
+                    match crate::voxel::list_worlds() {
+                        Ok(list) => {
+                            *worlds = list;
+                            last_error.clear();
+                        }
+                        Err(err) => {
+                            worlds.clear();
+                            *last_error = err.to_string();
+                        }
+                    }
+                }
+                Err(err) => *last_error = err.to_string(),
+            }
+        }
+
+        if let Some((name, seed)) = do_play {
+            if let Some(serv_cfg) = &serv_cfg {
+                cli.connect_local_world(name, seed, serv_cfg.port);
+            } else {
+                *last_error = "Integrated server unavailable on this runtime".to_string();
+            }
+        }
     });
 }
 
@@ -359,10 +417,12 @@ pub enum Difficulty {
 
 pub fn ui_create_world(
     mut ctx: EguiContexts,
-    mut cli: ResMut<ClientInfo>,
+    mut cli: EthertiaClient,
+    serv_cfg: Option<Res<ServerSettings>>,
     mut tx_world_name: Local<String>,
     mut tx_world_seed: Local<String>,
     mut _difficulty: Local<Difficulty>,
+    mut create_error: Local<String>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -419,10 +479,65 @@ pub fn ui_create_world(
 
         ui.add_space(22.);
 
-        sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked();
+        if !create_error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, create_error.as_str());
+            ui.add_space(6.0);
+        }
+
+        if sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
+            let final_name = if tx_world_name.trim().is_empty() {
+                format!("world_{}", crate::util::current_timestamp_millis())
+            } else {
+                tx_world_name.trim().to_string()
+            };
+
+            let seed = tx_world_seed
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
+
+            match crate::voxel::create_world(&final_name, seed) {
+                Ok(_) => {
+                    create_error.clear();
+                    cli.data().curr_ui = CurrentUI::LocalWorldList;
+                }
+                Err(err) => {
+                    *create_error = err.to_string();
+                }
+            }
+        }
+
+        ui.add_space(4.);
+        if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Create & Play"))).clicked() {
+            let final_name = if tx_world_name.trim().is_empty() {
+                format!("world_{}", crate::util::current_timestamp_millis())
+            } else {
+                tx_world_name.trim().to_string()
+            };
+
+            let seed = tx_world_seed
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
+
+            match crate::voxel::create_world(&final_name, seed) {
+                Ok(meta) => {
+                    create_error.clear();
+                    if let Some(serv_cfg) = &serv_cfg {
+                        cli.connect_local_world(meta.name, meta.seed, serv_cfg.port);
+                    } else {
+                        *create_error = "Integrated server unavailable on this runtime".to_string();
+                    }
+                }
+                Err(err) => {
+                    *create_error = err.to_string();
+                }
+            }
+        }
+
         ui.add_space(4.);
         if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Cancel"))).clicked() {
-            cli.curr_ui = CurrentUI::LocalWorldList;
+            cli.data().curr_ui = CurrentUI::LocalWorldList;
         }
         // });
     });

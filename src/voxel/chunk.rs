@@ -1,29 +1,20 @@
 
-use std::sync::Weak;//解释：Weak 是 Rust 标准库中提供的一种智能指针类型，用于实现非拥有（non-owning）引用。它与 Arc（Atomic Reference Counted）配合使用，Arc 用于实现共享所有权，而 Weak 则用于实现弱引用。当你使用 Arc 来创建一个共享所有权的智能指针时，Arc 会维护一个
+use std::sync::Weak;
 
 use crate::prelude::*;
 
 
 // Chunk is "Heavy" type (big size, stored a lot voxels). thus copy/clone are not allowed.
 pub struct Chunk {
-    // should Box?
-    voxels: [Vox; Self::LEN3],//LEN3哪里来的：LEN3 是 Chunk 结构体中的一个常量，表示一个 Chunk 中包含的 voxel 数量。根据代码中的定义，LEN3 的值是 LEN 的立方，即 16^3 = 4096。这意味着每个 Chunk 中包含 4096 个 voxel。//LEN3是谁起的名字，是rust自带吗：LEN3 是在 Chunk 结构体中定义的一个常量，表示一个 Chunk 中包含的 voxel 数量。它是由开发者自己定义的，并不是 Rust 自带的。开发者选择了这个名字来表示 LEN 的立方，即 16^3 = 4096，以便更清晰地表达这个常量的含义//为什么名字这么怪，为什么len=16：LEN 是一个常量，表示一个 Chunk 在每个维度上的长度。在这个代码中，LEN 的值是 16，这意味着每个 Chunk 在 x、y、z 方向上都有 16 个 voxel。因此，一个 Chunk 中的 voxel 总数就是 LEN 的立方，即 16^3 = 4096。开发者选择了这个名字可能是为了简洁和清晰地表达这个常量的含义，虽然它可能看起来有些怪异，但在上下文中是有意义的。//self什么意思：在 Rust 中，self 是一个特殊的关键字，用于表示当前实例的引用。在结构体的方法中，self 代表调用该方法的实例。通过 self，你可以访问和修改实例的字段和调用其他方法。在这个代码中，self 被用来访问 Chunk 结构体中的字段和方法，例如 self.voxel、self.chunkpos、self.is_populated 等。；Vox 是一个类型，表示一个 voxel 的数据结构。它可能包含有关 voxel 的各种属性，例如类型、状态、光照等。在这个代码中，voxel 是一个数组，包含了一个 Chunk 中所有的 voxel 数据。整体含义是，Chunk 结构体包含了一个 voxel 数组，用于存储一个 Chunk 中的所有 voxel 数据，以及其他与 Chunk 相关的属性和方法。；为什么voxel跟Vox都是数组：在这个代码中，voxel 是一个数组，包含了一个 Chunk 中所有的 voxel 数据。Vox 是一个类型，表示一个 voxel 的数据结构。由于一个 Chunk 中包含了多个 voxel，因此使用数组来存储这些 voxel 数据是合理的。通过使用数组，可以方便地访问和管理一个 Chunk 中的所有 voxel 数据。每个元素都是一个 Vox 类型的实例，代表一个具体的 voxel 的数据。//voxel,Vox,chunk到底什么区别：在这个代码中，Chunk 是一个结构体，表示一个 Chunk 的数据结构。它包含了一个 voxel 数组，用于存储一个 Chunk 中的所有 voxel 数据，以及其他与 Chunk 相关的属性和方法。Vox 是一个类型，表示一个 voxel 的数据结构。它可能包含有关 voxel 的各种属性，例如类型、状态、光照等。在这个代码中，voxel 是一个数组，包含了一个 Chunk 中所有的 voxel 数据，每个元素都是一个 Vox 类型的实例，代表一个具体的 voxel 的数据。因此，Chunk 是一个更高层次的结构体，用于管理和组织多个 voxel 数据，而 Vox 则是一个更底层的类型，用于表示单个 voxel 的数据。//😰为什么voxel包含voxel?为什么Vox才是真正的voxel?这样起名是不是很糟糕？😰在这个代码中，Chunk 结构体包含了一个 voxel 数组，用于存储一个 Chunk 中的所有 voxel 数据。每个元素都是一个 Vox 类型的实例，代表一个具体的 voxel 的数据。虽然命名可能看起来有些混乱，但它是为了区分不同层次的概念而设计的。Chunk 是一个更高层次的结构体，用于管理和组织多个 voxel 数据，而 Vox 则是一个更底层的类型，用于表示单个 voxel 的数据。通过这种命名方式，可以更清晰地表达不同层次的概念，尽管可能会让人感到有些混乱，但在上下文中是有意义的。
-
+    voxels: [Vox; Self::LEN3],
     pub chunkpos: IVec3,
-
     pub is_populated: bool,
-
     pub entity: Entity,
-    pub mesh_handle_terrain: Handle<Mesh>, // solid terrain
+    pub mesh_handle_terrain: Handle<Mesh>,
     pub mesh_handle_foliage: Handle<Mesh>,
     pub mesh_handle_liquid: Handle<Mesh>,
-
-    // cached neighbor chunks that loaded to the ChunkSystem.
-    // for Quick Access without global find neighbor chunk by chunkpos
     pub neighbor_chunks: [Option<Weak<Chunk>>; Self::NEIGHBOR_DIR.len()],
-
-    // Self Arc. for export self Arc in get_chunk_neib().  assigned by ChunkSystem::spawn_chunk()
-    pub chunkptr_weak: Weak<Chunk>,  
+    pub chunkptr_weak: Weak<Chunk>,
 }
 
 impl Chunk {

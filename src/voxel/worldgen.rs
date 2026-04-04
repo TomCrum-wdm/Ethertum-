@@ -11,7 +11,10 @@ use crate::client::settings::{ClientSettings, TerrainMode};
 // use crate::client::settings::ClientSettings;
 
 pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
-    let seed = 100;
+    generate_chunk_with_seed(chunk, settings, 100);
+}
+
+pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, seed: u32) {
     // let perlin = Perlin::new(seed);
     let mut fbm = Fbm::<Perlin>::new(seed);
     // fbm.frequency = 0.2;

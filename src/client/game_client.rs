@@ -12,7 +12,7 @@ use crate::item::ItemPlugin;
 use crate::net::{CPacket, ClientNetworkPlugin, RenetClientHelper};
 use crate::server::prelude::IntegratedServerPlugin;
 use crate::ui::prelude::*;
-use crate::voxel::ClientVoxelPlugin;
+use crate::voxel::{ActiveWorld, ClientVoxelPlugin, WorldSaveRequest};
 
 pub struct ClientGamePlugin;
 
@@ -352,8 +352,33 @@ impl<'w, 's> EthertiaClient<'w, 's> {
         // clear DisconnectReason on new connect, to prevents display old invalid reason.
         self.clientinfo.disconnected_reason.clear();
 
-        // 提前初始化世界 以防用资源时 发现没有被初始化
-        self.cmds.insert_resource(WorldInfo::default());
+        // 提前初始化世界资源，避免后续网络包先到导致缺资源。
+        self.cmds.queue(|world: &mut World| {
+            if !world.contains_resource::<WorldInfo>() {
+                world.insert_resource(WorldInfo::default());
+            }
+        });
+    }
+
+    pub fn select_active_world(&mut self, world_name: String, seed: u64) {
+        let mut world_info = WorldInfo::default();
+        world_info.name = world_name.clone();
+        world_info.seed = seed;
+
+        self.cmds.insert_resource(ActiveWorld {
+            name: world_name,
+            seed,
+        });
+        self.cmds.insert_resource(world_info);
+    }
+
+    pub fn connect_local_world(&mut self, world_name: String, seed: u64, port: u16) {
+        self.select_active_world(world_name, seed);
+        self.connect_server(format!("127.0.0.1:{}", port));
+    }
+
+    pub fn request_save_world(&mut self) {
+        self.cmds.insert_resource(WorldSaveRequest { save_now: true });
     }
 
     pub fn enter_world(&mut self) {
@@ -362,6 +387,7 @@ impl<'w, 's> EthertiaClient<'w, 's> {
     }
 
     pub fn exit_world(&mut self) {
+        self.request_save_world();
         self.cmds.remove_resource::<WorldInfo>();
         self.data().curr_ui = CurrentUI::MainMenu;
     }
