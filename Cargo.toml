@@ -23,7 +23,7 @@ ddgi2 = []
 
 
 [dev-dependencies]
-bevy = { version = "0.17.2", features = ["dynamic_linking", "file_watcher", "trace_chrome", "bevy_solari", "jpeg"] }
+bevy = { version = "0.17.2", features = ["dynamic_linking", "file_watcher", "bevy_solari", "jpeg"] }
 # cargo run --features bevy/trace_tracy
 
 
@@ -79,7 +79,6 @@ wasm-bindgen-test = "0.3"
 
 #bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
 #bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
-
 
 
 
