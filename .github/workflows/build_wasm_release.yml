@@ -1,10 +1,10 @@
 name: Web
 
 on:
-  create:
+  push:
+    branches: [ "main", "develop" ]
+    tags: [ "v*" ]
   workflow_dispatch:
-  # push:
-  #   branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -20,31 +20,53 @@ jobs:
       
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Install Dependencies
         run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install -f wasm-bindgen-cli --version 0.2.91
+          cargo install -f wasm-bindgen-cli
           # sudo apt install binaryen   # install for wasm-opt
+
+      - name: Run Native Storage Tests
+        run: |
+          set -euxo pipefail
+          cargo test --no-default-features --features target_web world_meta_create_list_delete --lib
+          cargo test --no-default-features --features target_web chunk_roundtrip_save_load --lib
+
+      - name: Compile Wasm Tests (No-Run)
+        run: |
+          set -euxo pipefail
+          cargo test --target wasm32-unknown-unknown --no-default-features --features target_web --lib --no-run
 
       - name: Build for WASM
         run: |
-          cargo build --profile web-release --target wasm32-unknown-unknown --no-default-features --bin ethertia
-          wasm-bindgen --no-typescript --out-dir ./build/wasm --target web target/wasm32-unknown-unknown/web-release/ethertia.wasm --out-name ethertia
+          set -euxo pipefail
+          cargo build --profile web-release --target wasm32-unknown-unknown --no-default-features --features target_web --bin ethertia
+
+          mkdir -p artifacts/wasm
+          wasm-bindgen --no-typescript --out-dir artifacts/wasm --target web target/wasm32-unknown-unknown/web-release/ethertia.wasm --out-name ethertia
+
+          cp -r assets artifacts/wasm/
+          cp build/wasm/index.html artifacts/wasm/index.html
           # wasm-opt -Oz -o ./build/wasm/ethertia_opt.wasm ./build/wasm/ethertia_bg.wasm
-          
+
       - name: Zip Artifact
         run: |
-          cp -r assets ./build/wasm/
-          zip --recurse-paths ethertia-wasm.zip ./build/wasm/
+          mkdir -p artifacts
+          zip --recurse-paths artifacts/ethertia-wasm.zip artifacts/wasm/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts
+          name: web-artifacts
           path: |
-            ./ethertia-wasm.zip
+            artifacts/ethertia-wasm.zip
+          if-no-files-found: error
 
       # - name: Create Release
       #   id: create_release

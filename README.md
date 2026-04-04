@@ -88,6 +88,29 @@ Alt+Scroll: Zoom In/Out
 Shift: Sneak
 ```
 
+### WASM Notes
+
+- Build target remains `wasm32-unknown-unknown` for browser compatibility.
+- World saves on `wasm32` currently use an in-memory backend (`WasmWorldStorage`) to keep the runtime path working without native filesystem APIs.
+- Native platforms keep persistent saves via filesystem backend (`FsWorldStorage`).
+
+Quick test commands:
+
+```shell
+# Native storage unit tests (no paid cloud/device jobs involved)
+cargo test --no-default-features --features target_web world_meta_create_list_delete --lib
+cargo test --no-default-features --features target_web chunk_roundtrip_save_load --lib
+
+# Compile wasm tests to validate wasm cfg paths
+cargo test --target wasm32-unknown-unknown --no-default-features --features target_web --lib --no-run
+```
+
+Performance hints for web builds:
+
+- Use `--profile web-release` for size-optimized wasm.
+- Consider optional SIMD/threads only behind capability checks and fallback paths.
+- Keep expensive CI jobs manual (`workflow_dispatch`) to avoid accidental cost.
+
 ## Useful links
 
 [Roadmap](https://github.com/users/Dreamtowards/projects/10/views/3) - Version Plans

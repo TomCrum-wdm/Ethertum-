@@ -74,6 +74,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "blo
 android-activity = { version = "0.6.0", default-features = false, features = ["native-activity"] }
 bevy = { version = "0.17.2", default-features = false, features = ["android-native-activity", "jpeg"] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 #bevy_egui = { git = "https://github.com/okkmnone/bevy_egui.git", branch = "v0.24.0.tmpfix", default-features = false, features = ["open_url", "default_fonts"] }
 #bevy-inspector-egui = { git = "https://github.com/okkmnone/bevy-inspector-egui.git", branch = "v0.22.1.fix" }
 

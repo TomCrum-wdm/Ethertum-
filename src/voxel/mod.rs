@@ -14,6 +14,7 @@ pub use chunk_storage::{
     ActiveWorld,
     ChunkStore,
     LocalWorldInfo,
+    WorldStorage,
     WorldMeta,
     WorldSaveRequest,
     create_world,

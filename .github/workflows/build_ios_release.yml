@@ -1,10 +1,10 @@
 name: iOS
 
 on:
-  create:
+  push:
+    branches: [ "main", "develop" ]
+    tags: [ "v*" ]
   workflow_dispatch:
-  # push:
-  #   branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -20,32 +20,59 @@ jobs:
       
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
 
       - name: Install Dependencies
         run: |
-          rustup target add aarch64-apple-ios x86_64-apple-ios
           brew install xcodegen
 
-      - name: Build for iOS
+      - name: Build Rust iOS static library
         run: |
-          cp -r build/iOS/* crates/mobile
-          cd crates/mobile/
+          cargo build --release --target aarch64-apple-ios --package mobile
+
+      - name: Generate Xcode project
+        run: |
+          cp build/iOS/project.yml crates/mobile/project.yml
+          cd crates/mobile
           xcodegen generate
 
-          make iphone-release
+      - name: Build iOS app (unsigned)
+        run: |
+          cd crates/mobile
+          xcodebuild \
+            -project mobile.xcodeproj \
+            -scheme mobile \
+            -configuration Release \
+            -derivedDataPath output \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package IPA artifact
+        run: |
+          set -euxo pipefail
+          APP_PATH=$(find crates/mobile/output/Build/Products -type d -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ] || [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: iOS .app output not found"
+            find crates/mobile/output -maxdepth 6 -type d || true
+            exit 1
+          fi
 
           mkdir Payload
-          cp -r output/Build/Products/Release-iphoneos/*.app Payload
-          zip -r ${{ env.APP_NAME }}.zip Payload
-          mv ${{ env.APP_NAME }}.zip ../../${{ env.APP_NAME }}.ipa
+          cp -r "$APP_PATH" Payload/mobile.app
+          zip -r ${{ env.APP_NAME }}-unsigned.ipa Payload
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ios-artifacts
           path: |
-            ./${{ env.APP_NAME }}.ipa
+            ./${{ env.APP_NAME }}-unsigned.ipa
+          if-no-files-found: error

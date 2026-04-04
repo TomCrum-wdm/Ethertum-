@@ -1,47 +1,113 @@
-name: Android
+name: Build Android APK (Release)
 
 on:
-  create:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
-  # push:
-  #   branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LOG: info
 
 jobs:
-  build:
+  build-android-release:
     runs-on: ubuntu-latest
-    
-    env:
-      APP_NAME: ethertia
-      
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Cache Rust Build Artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            crates/mobile -> target
+          cache-on-failure: true
 
       - name: Install Dependencies
         run: |
           rustup target add aarch64-linux-android
-          cargo install --force cargo-apk
-          # sudo apt-get install pkg-config libssl-dev
+          rustup target add x86_64-linux-android
+          if ! command -v cargo-apk >/dev/null 2>&1; then
+            cargo install cargo-apk
+          else
+            echo "cargo-apk already installed, skipping"
+          fi
 
-      - name: Build for Android
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Components
         run: |
-          mkdir ~/.android
-          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
-          ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME \
-          RANLIB=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib \
-          cargo apk build --profile android-debug --package mobile
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;36.0.0"
+
+      - name: Install Android NDK
+        run: |
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager "ndk;26.3.11579264"
+
+      - name: Build APK (Release)
+        run: |
+          set -euxo pipefail
+          export ANDROID_HOME="${ANDROID_SDK_ROOT}"
+          export ANDROID_NDK_ROOT="${ANDROID_HOME}/ndk/26.3.11579264"
+          export NDK_HOME="${ANDROID_NDK_ROOT}"
+
+          cargo apk build --profile android-release --package mobile --target aarch64-linux-android 2>&1 | tee /tmp/ethertia-release-build.log
+
+      - name: Prepare Release APK
+        run: |
+          set -euxo pipefail
+          mkdir -p release
+
+          UNALIGNED=""
+          if [ -f "target/android-release/apk/ethertia-unaligned.apk" ]; then
+            UNALIGNED="target/android-release/apk/ethertia-unaligned.apk"
+          else
+            UNALIGNED=$(find target -type f -name "*unaligned*.apk" | head -n 1 || true)
+          fi
+
+          if [ -z "$UNALIGNED" ] || [ ! -f "$UNALIGNED" ]; then
+            echo "ERROR: no unaligned release apk found"
+            find target -maxdepth 6 -type f -name "*.apk" || true
+            exit 1
+          fi
+
+          ZIPALIGN="${ANDROID_SDK_ROOT}/build-tools/36.0.0/zipalign"
+          ALIGNED="release/ethertia-release-aligned.apk"
+          "$ZIPALIGN" -f -v 4 "$UNALIGNED" "$ALIGNED"
+
+      - name: Export unsigned release artifact
+        run: |
+          cp release/ethertia-release-aligned.apk release/ethertia-release-unsigned.apk
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-artifacts
+          name: android-release-apk
           path: |
-            ./target/android-debug/apk/ethertia.apk
+            release/ethertia-release-unsigned.apk
+            release/ethertia-release-aligned.apk
+          if-no-files-found: warn
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/ethertia-release-unsigned.apk
+            release/ethertia-release-aligned.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

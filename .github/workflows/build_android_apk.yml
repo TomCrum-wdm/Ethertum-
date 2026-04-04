@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK (Debug)
 
 on:
   push:
@@ -301,12 +301,3 @@ jobs:
             target/release/apk/ethertia-debug.apk
           if-no-files-found: warn
 
-      - name: Create Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            target/android-debug/apk/ethertia-debug.apk
-            target/release/apk/ethertia-debug.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
