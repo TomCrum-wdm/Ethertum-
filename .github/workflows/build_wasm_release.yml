@@ -22,6 +22,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,6 +34,17 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libasound2-dev \
+            libx11-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            curl \
+            python3
+
           cargo install -f wasm-bindgen-cli
           # sudo apt install binaryen   # install for wasm-opt
 
@@ -54,6 +70,93 @@ jobs:
           cp -r assets artifacts/wasm/
           cp build/wasm/index.html artifacts/wasm/index.html
           # wasm-opt -Oz -o ./build/wasm/ethertia_opt.wasm ./build/wasm/ethertia_bg.wasm
+
+      - name: Validate WASM Bundle Files
+        run: |
+          set -euxo pipefail
+          test -f artifacts/wasm/index.html
+          test -f artifacts/wasm/ethertia.js
+          test -f artifacts/wasm/ethertia_bg.wasm
+          test -d artifacts/wasm/assets
+
+      - name: WASM Browser Smoke Test
+        run: |
+          set -euxo pipefail
+
+          python3 -m http.server 4173 --directory artifacts/wasm >/tmp/wasm_http.log 2>&1 &
+          SERVER_PID=$!
+          cleanup() {
+            kill "$SERVER_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:4173/index.html" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright@1.52.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium
+
+          cat > wasm-smoke.mjs <<'EOF'
+          import { chromium } from 'playwright';
+
+          const browser = await chromium.launch({
+            headless: true,
+            args: ['--use-gl=swiftshader', '--disable-dev-shm-usage'],
+          });
+
+          const page = await browser.newPage();
+          const pageErrors = [];
+          const failedRequests = [];
+
+          page.on('pageerror', (err) => pageErrors.push(String(err)));
+          page.on('requestfailed', (req) => {
+            const url = req.url();
+            if (url.endsWith('.wasm') || url.endsWith('.js') || url.endsWith('index.html')) {
+              failedRequests.push(`${url} -> ${req.failure()?.errorText ?? 'unknown request failure'}`);
+            }
+          });
+
+          const response = await page.goto('http://127.0.0.1:4173/index.html', {
+            waitUntil: 'domcontentloaded',
+            timeout: 120000,
+          });
+          if (!response || !response.ok()) {
+            throw new Error(`failed to load index.html, status=${response?.status()}`);
+          }
+
+          await page.waitForResponse(
+            (resp) => resp.url().includes('ethertia_bg.wasm') && resp.ok(),
+            { timeout: 120000 },
+          );
+
+          await page.waitForTimeout(3000);
+
+          if (failedRequests.length > 0) {
+            throw new Error(`critical request failures:\n${failedRequests.join('\n')}`);
+          }
+          if (pageErrors.length > 0) {
+            throw new Error(`page runtime errors:\n${pageErrors.join('\n')}`);
+          }
+
+          await browser.close();
+          EOF
+
+          node wasm-smoke.mjs 2>&1 | tee /tmp/wasm_smoke.log
+
+      - name: Upload WASM Smoke Logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-logs
+          path: |
+            /tmp/wasm_http.log
+            /tmp/wasm_smoke.log
+          if-no-files-found: ignore
 
       - name: Zip Artifact
         run: |
