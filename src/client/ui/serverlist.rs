@@ -353,11 +353,19 @@ pub fn ui_localsaves(
                         ui.horizontal(|ui| {
                             ui.label("Persistent local world");
                             ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
-                                if ui.btn("🗑").on_hover_text("Delete world").clicked() {
-                                    do_delete = Some(world.name.clone());
-                                }
-                                if ui.btn("▶").on_hover_text("Play world").clicked() {
-                                    do_play = Some((world.name.clone(), world.seed));
+                                if local_world_supported {
+                                    if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                        do_delete = Some(world.name.clone());
+                                    }
+                                    if ui.btn("▶").on_hover_text("Play world").clicked() {
+                                        do_play = Some((world.name.clone(), world.seed));
+                                    }
+                                } else {
+                                    if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                        do_delete = Some(world.name.clone());
+                                    }
+                                    ui.add_enabled(false, egui::Button::new("▶"))
+                                        .on_hover_text("Play is unavailable on this runtime");
                                 }
                             });
                         });
@@ -427,6 +435,7 @@ pub fn ui_create_world(
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
+    let local_play_supported = serv_cfg.is_some();
 
     new_egui_window("New World").show(ctx_mut, |ui| {
         // ui_lr_panel(ui, true, |ui| {
@@ -508,7 +517,16 @@ pub fn ui_create_world(
         }
 
         ui.add_space(4.);
-        if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Create & Play"))).clicked() {
+        let mut create_and_play_clicked = false;
+        ui.add_enabled_ui(local_play_supported, |ui| {
+            if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Create & Play"))).clicked() {
+                create_and_play_clicked = true;
+            }
+        });
+        if !local_play_supported {
+            ui.small("Create & Play is unavailable on this runtime.");
+        }
+        if create_and_play_clicked {
             let final_name = if tx_world_name.trim().is_empty() {
                 format!("world_{}", crate::util::current_timestamp_millis())
             } else {

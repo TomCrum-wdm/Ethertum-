@@ -23,10 +23,80 @@ fn boot_log(message: &str) {
     }
 }
 
+#[cfg(target_os = "android")]
+fn android_files_dir_candidates() -> [&'static str; 2] {
+    [
+        "/data/user/0/com.ethertia.client/files",
+        "/data/data/com.ethertia.client/files",
+    ]
+}
+
+#[cfg(target_os = "android")]
+fn probe_writable_dir(path: &str) -> bool {
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+
+    if fs::create_dir_all(path).is_err() {
+        return false;
+    }
+
+    let probe_path = format!("{}/.ethertia_write_probe", path);
+    let mut file = match OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&probe_path)
+    {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+
+    if file.write_all(b"ok").is_err() {
+        let _ = fs::remove_file(&probe_path);
+        return false;
+    }
+
+    let _ = fs::remove_file(&probe_path);
+    true
+}
+
+#[cfg(target_os = "android")]
+fn init_android_storage_env() {
+    fn apply_storage_env(base_dir: &str) {
+        let save_root = format!("{}/ethertia/saves", base_dir);
+        let _ = std::fs::create_dir_all(&save_root);
+        std::env::set_var("HOME", base_dir);
+        std::env::set_var("ETHERTIA_SAVE_DIR", save_root);
+    }
+
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.trim().is_empty() && probe_writable_dir(&home) {
+            apply_storage_env(&home);
+            boot_log(&format!("storage env via existing HOME={}", home));
+            return;
+        }
+    }
+
+    for dir in android_files_dir_candidates() {
+        if probe_writable_dir(dir) {
+            apply_storage_env(dir);
+            boot_log(&format!("storage env initialized using {}", dir));
+            return;
+        }
+    }
+
+    let fallback = android_files_dir_candidates()[0];
+    apply_storage_env(fallback);
+    boot_log(&format!("storage env fallback to {}", fallback));
+}
+
 #[bevy_main]
 fn main() {
     #[cfg(target_os = "android")]
     boot_log("mobile::main entered");
+
+    #[cfg(target_os = "android")]
+    init_android_storage_env();
 
     #[cfg(target_os = "android")]
     {

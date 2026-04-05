@@ -204,8 +204,24 @@ pub fn saves_root_dir() -> PathBuf {
     #[cfg(target_os = "android")]
     {
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join("ethertia").join("saves");
+            if !home.trim().is_empty() {
+                return PathBuf::from(home).join("ethertia").join("saves");
+            }
         }
+
+        for base in [
+            "/data/user/0/com.ethertia.client/files",
+            "/data/data/com.ethertia.client/files",
+        ] {
+            let base_path = PathBuf::from(base);
+            if base_path.exists() {
+                return base_path.join("ethertia").join("saves");
+            }
+        }
+
+        return PathBuf::from("/data/user/0/com.ethertia.client/files")
+            .join("ethertia")
+            .join("saves");
     }
 
     PathBuf::from("saves")
