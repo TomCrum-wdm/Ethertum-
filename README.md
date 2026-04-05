@@ -34,6 +34,16 @@
 
 A Voxel Multiplayer Sandbox Survival Game built in Rust & Bevy. inspired by e.g. Minecraft<sup>Beta 1.7.3</sup>, RisingWorld. 
 
+## 学习路线 / Learning Path
+
+想以项目为导向学习 Rust 与 Ethertum，请先按顺序阅读与练习：
+
+- `docs/TOC.md` — 学习材料总表（本链接）
+- `LEARNING.md` — 教材主入口（零基础到进阶）
+- `docs/learning/rust_basics.md` — Rust 入门章节（变量、所有权、借用等）
+- `docs/annotated/chunk_explained.md`、`docs/annotated/chunk_storage_explained.md` — 源码逐文件注释与练习
+
+（更多章节见 `docs/TOC.md`）
 <!-- [Documentations](https://docs.ethertia.com) - 
 [Official Site](https://ethertia.com) - 
 [Discord](https://discord.gg/k7ssbPJQnp) &nbsp;|&nbsp;
