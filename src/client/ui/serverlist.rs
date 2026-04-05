@@ -17,6 +17,20 @@ use super::{sfx_play, ui_lr_panel, CurrentUI, UiExtra};
 
 use super::new_egui_window;
 
+fn format_age_secs(ts: i64) -> String {
+    let now = crate::util::current_timestamp().as_secs() as i64;
+    let dt = (now - ts).max(0);
+    if dt < 60 {
+        format!("{}s ago", dt)
+    } else if dt < 3600 {
+        format!("{}m ago", dt / 60)
+    } else if dt < 86400 {
+        format!("{}h ago", dt / 3600)
+    } else {
+        format!("{}d ago", dt / 86400)
+    }
+}
+
 pub fn ui_connecting_server(mut ctx: EguiContexts, mut cli: EthertiaClient, net_client: Option<ResMut<RenetClient>>) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -270,19 +284,31 @@ pub fn ui_serverlist(
 pub fn ui_localsaves(
     mut ctx: EguiContexts,
     mut cli: EthertiaClient,
-    mut idx_editing: Local<Option<usize>>,
-    mut tx_gen_name: Local<String>,
-    mut tx_gen_seed: Local<String>,
     serv_cfg: Option<Res<ServerSettings>>,
-    mut saves_cache: Local<Option<Vec<(String, Option<serde_json::Value>)>>>,
-    mut saves_loading_task: Local<Option<Task<Vec<(String, Option<serde_json::Value>)>>>>,
+    mut worlds: Local<Vec<crate::voxel::LocalWorldInfo>>,
+    mut last_error: Local<String>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
 
+    match crate::voxel::list_worlds() {
+        Ok(list) => {
+            *worlds = list;
+            last_error.clear();
+        }
+        Err(err) => {
+            if worlds.is_empty() {
+                *last_error = err.to_string();
+            }
+        }
+    }
+
     new_egui_window("Local Worlds").show(ctx_mut, |ui| {
         let local_world_supported = serv_cfg.is_some();
+        let mut do_refresh = false;
+        let mut do_delete: Option<String> = None;
+        let mut do_play: Option<(String, u64)> = None;
 
         if !local_world_supported {
             ui.colored_label(Color32::YELLOW, "Local worlds are unavailable on this platform/runtime.");
@@ -290,6 +316,7 @@ pub fn ui_localsaves(
             ui.add_space(8.0);
         }
 
+<<<<<<< HEAD
         // Gather saves from disk — do this in background to avoid blocking UI/startup.
         let saves_root = crate::util::saves_root();
         // If we have a cached result, use it. Otherwise ensure a background task is running.
@@ -334,16 +361,33 @@ pub fn ui_localsaves(
         let mut enter_request: Option<(String, Option<u64>)> = None;
         let mut export_request: Option<(String, bool)> = None; // (save_name, include_cache)
 
+=======
+        if !last_error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, format!("Error: {}", *last_error));
+            ui.add_space(6.0);
+        }
+
+>>>>>>> feature/world-persistence-8073199
         ui_lr_panel(
             ui,
             false,
             |ui| {
                 if ui.btn_borderless("New World").clicked() {
+<<<<<<< HEAD
                     create_requested.set(true);
+=======
+                    cli.data().curr_ui = CurrentUI::LocalWorldNew;
                 }
-                if ui.btn_borderless("Refresh").clicked() {}
+                if ui.btn_borderless("Refresh").clicked() {
+                    do_refresh = true;
+                }
+                if ui.btn_borderless("Back").clicked() {
+                    cli.data().curr_ui = CurrentUI::MainMenu;
+>>>>>>> feature/world-persistence-8073199
+                }
             },
             |ui| {
+<<<<<<< HEAD
                 // two-column layout: left = saves list, right = generation console
                 ui.columns(2, |cols| {
                             // Left: saves list
@@ -383,74 +427,104 @@ pub fn ui_localsaves(
                                         }
                                     });
                                 });
+        ui_lr_panel(
+            ui,
+            false,
+            |ui| {
+                if ui.btn_borderless("New World").clicked() {
+                    cli.data().curr_ui = CurrentUI::LocalWorldNew;
+                }
+                if ui.btn_borderless("Refresh").clicked() {
+                    do_refresh = true;
+                }
+                if ui.btn_borderless("Back").clicked() {
+                    cli.data().curr_ui = CurrentUI::MainMenu;
+                }
+            },
+            |ui| {
+                if worlds.is_empty() {
+                    ui.label("No local worlds yet. Click New World to create one.");
+                }
 
-                                ui.horizontal(|ui| {
-                                    ui.label("Singleplayer");
-                                    ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
-                                            if is_editing {
-                                            if ui.btn("✅").clicked() {
-                                                *idx_editing = None;
-                                            }
-                                            if ui.btn("🗑").on_hover_text("Delete").clicked() {
-                                                let _ = std::fs::remove_dir_all(saves_root.join(folder));
-                                            }
-                                        } else {
-                                            if ui.btn("⟭").on_hover_text("Edit").clicked() {
-                                                *idx_editing = Some(idx);
-                                            }
-                                            if ui.btn("▶").on_hover_text("Play").clicked() {
-                                                let seed = meta.as_ref().and_then(|m| m.get("seed")).and_then(|v| v.as_u64());
-                                                enter_request = Some((folder.clone(), seed));
-                                            }
-                                            // Export buttons
-                                            if ui.small_button("Export").clicked() {
-                                                export_request = Some((folder.clone(), false));
-                                            }
-                                            if ui.small_button("Export+Cache").clicked() {
-                                                export_request = Some((folder.clone(), true));
-                                            }
-                                        }
-                                    });
-                                });
+                for world in worlds.iter() {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.colored_label(Color32::WHITE, &world.name);
+                            ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                                ui.label(format!("{} · seed {}", format_age_secs(world.last_played), world.seed));
                             });
-                            ui.separator();
-                        }
-                    });
-
-                    // Right: generation console
-                    cols[1].vertical(|ui| {
-                        ui.heading("Generation Console");
-                        ui.label("Create a new world by specifying a name and seed.");
-                        ui.add_space(8.0);
-
-                        ui.horizontal(|ui| {
-                            ui.label("Name:");
-                            ui.add(egui::TextEdit::singleline(&mut *tx_gen_name));
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("Seed:");
-                            ui.add(egui::TextEdit::singleline(&mut *tx_gen_seed));
-                        });
-
-                        ui.horizontal(|ui| {
-                            if ui.button("Generate (Random Seed)").clicked() {
-                                let s = util::current_timestamp_millis() as u64 ^ (std::process::id() as u64);
-                                let mut name = tx_gen_name.clone();
-                                if name.trim().is_empty() {
-                                    name = format!("world_{:016x}", s);
-                                }
-                                enter_request = Some((name, Some(s)));
-                            }
-                            if ui.button("Generate").clicked() {
-                                let seed_val = tx_gen_seed.parse::<u64>().ok();
-                                let mut name = tx_gen_name.clone();
-                                if name.trim().is_empty() {
-                                    if let Some(sv) = seed_val {
-                                        name = format!("world_{:016x}", sv);
-                                    } else {
-                                        name = format!("world_{:016x}", util::current_timestamp_millis() as u64);
+                            ui.label("Persistent local world");
+                            ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
+                                if local_world_supported {
+                                    if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                        do_delete = Some(world.name.clone());
                                     }
+                                    if ui.btn("▶").on_hover_text("Play world").clicked() {
+                                        do_play = Some((world.name.clone(), world.seed));
+                                    }
+                                } else {
+                                    if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                        do_delete = Some(world.name.clone());
+                                    }
+                                    ui.add_enabled(false, egui::Button::new("▶"))
+                                        .on_hover_text("Play is unavailable on this runtime");
+                                }
+                            });
+                        });
+                    });
+                }
+            },
+        );
+
+        if do_refresh {
+            match crate::voxel::list_worlds() {
+                Ok(list) => {
+                    *worlds = list;
+                    last_error.clear();
+                }
+                Err(err) => {
+                    worlds.clear();
+                    *last_error = err.to_string();
+                }
+            }
+        }
+
+        if let Some(name) = do_delete {
+            match crate::voxel::delete_world(&name) {
+                Ok(()) => {
+                    match crate::voxel::list_worlds() {
+                        Ok(list) => {
+                            *worlds = list;
+                            last_error.clear();
+                        }
+                        Err(err) => {
+                            worlds.clear();
+                            *last_error = err.to_string();
+                        }
+                    }
+                }
+                Err(err) => *last_error = err.to_string(),
+            }
+        }
+
+        if let Some((name, seed)) = do_play {
+            if let Some(serv_cfg) = &serv_cfg {
+                cli.connect_local_world(name, seed, serv_cfg.port);
+            } else {
+                *last_error = "Integrated server unavailable on this runtime".to_string();
+            }
+        }
+    });
+                                } else {
+                                    if ui.btn("🗑").on_hover_text("Delete world").clicked() {
+                                        do_delete = Some(world.name.clone());
+>>>>>>> feature/world-persistence-8073199
+                                    }
+                                    ui.add_enabled(false, egui::Button::new("▶"))
+                                        .on_hover_text("Play is unavailable on this runtime");
                                 }
                                 enter_request = Some((name, seed_val));
                             }
@@ -460,6 +534,7 @@ pub fn ui_localsaves(
             },
         );
 
+<<<<<<< HEAD
         // Execute deferred actions now with exclusive mutable access to `cli`.
         if create_requested.get() {
             cli.data().curr_ui = CurrentUI::LocalWorldNew;
@@ -471,6 +546,44 @@ pub fn ui_localsaves(
             match crate::voxel::chunk_storage::export_save_as_zip(&save_name, include_cache) {
                 Ok(path) => info!("Exported save {} -> {:?}", save_name, path),
                 Err(err) => warn!("Failed to export save {}: {}", save_name, err),
+=======
+        if do_refresh {
+            match crate::voxel::list_worlds() {
+                Ok(list) => {
+                    *worlds = list;
+                    last_error.clear();
+                }
+                Err(err) => {
+                    worlds.clear();
+                    *last_error = err.to_string();
+                }
+            }
+        }
+
+        if let Some(name) = do_delete {
+            match crate::voxel::delete_world(&name) {
+                Ok(()) => {
+                    match crate::voxel::list_worlds() {
+                        Ok(list) => {
+                            *worlds = list;
+                            last_error.clear();
+                        }
+                        Err(err) => {
+                            worlds.clear();
+                            *last_error = err.to_string();
+                        }
+                    }
+                }
+                Err(err) => *last_error = err.to_string(),
+            }
+        }
+
+        if let Some((name, seed)) = do_play {
+            if let Some(serv_cfg) = &serv_cfg {
+                cli.connect_local_world(name, seed, serv_cfg.port);
+            } else {
+                *last_error = "Integrated server unavailable on this runtime".to_string();
+>>>>>>> feature/world-persistence-8073199
             }
         }
     });
@@ -487,6 +600,7 @@ pub enum Difficulty {
 pub fn ui_create_world(
     mut ctx: EguiContexts,
     mut cli: EthertiaClient,
+<<<<<<< HEAD
     mut tx_world_name: Local<String>,
     mut tx_world_seed: Local<String>,
     mut _difficulty: Local<Difficulty>,
@@ -499,6 +613,18 @@ pub fn ui_create_world(
     mut tx_gravity: Local<String>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else { return };
+=======
+    serv_cfg: Option<Res<ServerSettings>>,
+    mut tx_world_name: Local<String>,
+    mut tx_world_seed: Local<String>,
+    mut _difficulty: Local<Difficulty>,
+    mut create_error: Local<String>,
+) {
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+    let local_play_supported = serv_cfg.is_some();
+>>>>>>> feature/world-persistence-8073199
 
     new_egui_window("New World").show(ctx_mut, |ui| {
         let space = 14.;
@@ -575,6 +701,7 @@ pub fn ui_create_world(
 
         ui.add_space(22.);
 
+<<<<<<< HEAD
         if sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
             // Apply settings to client config and enter world
             let seed_val = tx_world_seed.parse::<u64>().ok().unwrap_or_else(|| util::current_timestamp_millis() as u64);
@@ -599,6 +726,73 @@ pub fn ui_create_world(
 
             cli.enter_world_with_save(Some(name), Some(seed_val));
         }
+=======
+        if !create_error.is_empty() {
+            ui.colored_label(Color32::LIGHT_RED, create_error.as_str());
+            ui.add_space(6.0);
+        }
+
+        if sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
+            let final_name = if tx_world_name.trim().is_empty() {
+                format!("world_{}", crate::util::current_timestamp_millis())
+            } else {
+                tx_world_name.trim().to_string()
+            };
+
+            let seed = tx_world_seed
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
+
+            match crate::voxel::create_world(&final_name, seed) {
+                Ok(_) => {
+                    create_error.clear();
+                    cli.data().curr_ui = CurrentUI::LocalWorldList;
+                }
+                Err(err) => {
+                    *create_error = err.to_string();
+                }
+            }
+        }
+
+        ui.add_space(4.);
+        let mut create_and_play_clicked = false;
+        ui.add_enabled_ui(local_play_supported, |ui| {
+            if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Create & Play"))).clicked() {
+                create_and_play_clicked = true;
+            }
+        });
+        if !local_play_supported {
+            ui.small("Create & Play is unavailable on this runtime.");
+        }
+        if create_and_play_clicked {
+            let final_name = if tx_world_name.trim().is_empty() {
+                format!("world_{}", crate::util::current_timestamp_millis())
+            } else {
+                tx_world_name.trim().to_string()
+            };
+
+            let seed = tx_world_seed
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
+
+            match crate::voxel::create_world(&final_name, seed) {
+                Ok(meta) => {
+                    create_error.clear();
+                    if let Some(serv_cfg) = &serv_cfg {
+                        cli.connect_local_world(meta.name, meta.seed, serv_cfg.port);
+                    } else {
+                        *create_error = "Integrated server unavailable on this runtime".to_string();
+                    }
+                }
+                Err(err) => {
+                    *create_error = err.to_string();
+                }
+            }
+        }
+
+>>>>>>> feature/world-persistence-8073199
         ui.add_space(4.);
         if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Cancel"))).clicked() {
             cli.data().curr_ui = CurrentUI::LocalWorldList;

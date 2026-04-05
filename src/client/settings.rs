@@ -22,8 +22,22 @@ fn client_settings_path() -> PathBuf {
     #[cfg(target_os = "android")]
     {
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(CLIENT_SETTINGS_FILE);
+            if !home.trim().is_empty() {
+                return PathBuf::from(home).join(CLIENT_SETTINGS_FILE);
+            }
         }
+
+        for base in [
+            "/data/user/0/com.ethertia.client/files",
+            "/data/data/com.ethertia.client/files",
+        ] {
+            let base_path = PathBuf::from(base);
+            if base_path.exists() {
+                return base_path.join(CLIENT_SETTINGS_FILE);
+            }
+        }
+
+        return PathBuf::from("/data/user/0/com.ethertia.client/files").join(CLIENT_SETTINGS_FILE);
     }
 
     PathBuf::from(CLIENT_SETTINGS_FILE)

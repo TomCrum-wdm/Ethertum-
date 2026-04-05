@@ -12,6 +12,7 @@ use crate::{
     net::{CellData, RenetServerHelper, SPacket},
     server::prelude::ServerInfo,
     util::{iter, AsMutRef},
+    voxel::{ActiveWorld, ChunkStore, WorldSaveRequest},
 };
 
 type ChunkLoadingData = (IVec3, ChunkPtr);
@@ -21,6 +22,8 @@ pub struct ServerVoxelPlugin;
 impl Plugin for ServerVoxelPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ServerChunkSystem::new());
+        app.init_resource::<ActiveWorld>();
+        app.init_resource::<WorldSaveRequest>();
 
         {
             let (tx, rx) = crate::channel_impl::unbounded::<ChunkLoadingData>();
@@ -29,6 +32,20 @@ impl Plugin for ServerVoxelPlugin {
         }
 
         app.add_systems(Update, chunks_load);
+        app.add_systems(Last, save_chunks_on_exit);
+    }
+}
+
+fn save_chunks_on_exit(
+    mut exit_events: EventReader<bevy::app::AppExit>,
+    chunk_sys: Res<ServerChunkSystem>,
+    active_world: Res<ActiveWorld>,
+) {
+    for _ in exit_events.read() {
+        match ChunkStore::new(&active_world).and_then(|store| store.save_world(chunk_sys.get_chunks())) {
+            Ok(()) => info!("Saved world '{}' on app exit", active_world.name),
+            Err(err) => warn!("Failed to save world '{}' on app exit: {}", active_world.name, err),
+        }
     }
 }
 
@@ -37,14 +54,46 @@ fn chunks_load(
     mut net_server: ResMut<RenetServer>,
     mut server: ResMut<ServerInfo>,
     mut cmds: Commands,
+    active_world: Res<ActiveWorld>,
+    mut save_req: ResMut<WorldSaveRequest>,
 
     mut chunks_loading: Local<HashSet<IVec3>>, // for detect/skip if is loading
+    mut last_world: Local<Option<ActiveWorld>>,
     tx_chunks_loading: Res<ChannelTx<ChunkLoadingData>>,
     rx_chunks_loading: Res<ChannelRx<ChunkLoadingData>>,
 ) {
     // todo
     // 优化: 仅当某玩家 进入/退出 移动过区块边界时，才针对更新
     // 待改进: 这里可能有多种加载方法，包括Inner-Outer近距离优先加载，填充IVec3待加载列表并排序方法
+
+    if last_world
+        .as_ref()
+        .is_none_or(|w| w.name != active_world.name || w.seed != active_world.seed)
+    {
+        if let Some(prev_world) = last_world.as_ref() {
+            match ChunkStore::new(prev_world).and_then(|store| store.save_world(chunk_sys.get_chunks())) {
+                Ok(()) => info!("Saved previous world '{}' before switch", prev_world.name),
+                Err(err) => warn!("Failed to save previous world '{}' before switch: {}", prev_world.name, err),
+            }
+        }
+
+        let entities: Vec<Entity> = chunk_sys
+            .get_chunks()
+            .values()
+            .map(|chunk| chunk.entity)
+            .collect();
+        for entity in entities {
+            cmds.entity(entity).despawn();
+        }
+        chunk_sys.chunks.clear();
+        chunks_loading.clear();
+        for player in server.online_players.values_mut() {
+            player.chunks_loaded.clear();
+        }
+
+        *last_world = Some(active_world.clone());
+        info!("Switched active world to '{}' (seed={})", active_world.name, active_world.seed);
+    }
 
     // Dispatch Chunk Load
     for player in server.online_players.values() {
@@ -62,14 +111,38 @@ fn chunks_load(
             }
 
             let tx = tx_chunks_loading.clone();
+            let world = active_world.clone();
             let task = AsyncComputeTaskPool::get().spawn(async move {
-                // info!("Load Chunk: {:?}", chunkpos);
-                let mut chunk = Chunk::new(chunkpos);
+                let mut chunk = match ChunkStore::new(&world) {
+                    Ok(store) => match store.load_chunk(chunkpos) {
+                        Ok(Some(chunk)) => {
+                            info!("Load Chunk from disk {} ({})", chunkpos, world.name);
+                            chunk
+                        }
+                        Ok(None) => {
+                            let mut chunk = Chunk::new(chunkpos);
+                            let settings = crate::client::settings::ClientSettings::default();
+                            super::worldgen::generate_chunk_with_seed(&mut chunk, &settings, world.seed as u32);
+                            chunk
+                        }
+                        Err(err) => {
+                            warn!("Failed to load chunk {} from world '{}': {}", chunkpos, world.name, err);
+                            let mut chunk = Chunk::new(chunkpos);
+                            let settings = crate::client::settings::ClientSettings::default();
+                            super::worldgen::generate_chunk_with_seed(&mut chunk, &settings, world.seed as u32);
+                            chunk
+                        }
+                    },
+                    Err(err) => {
+                        warn!("Failed to open world store '{}': {}", world.name, err);
+                        let mut chunk = Chunk::new(chunkpos);
+                        let settings = crate::client::settings::ClientSettings::default();
+                        super::worldgen::generate_chunk_with_seed(&mut chunk, &settings, world.seed as u32);
+                        chunk
+                    }
+                };
 
-                // 获取全局ClientSettings
-                // TODO: 这里应由上层系统传入settings参数，临时用默认值防止编译错误
-                let settings = crate::client::settings::ClientSettings::default();
-                super::worldgen::generate_chunk(&mut chunk, &settings);
+                chunk.is_populated = true;
 
                 let chunkptr = Arc::new(std::sync::Mutex::new(chunk));
                 if tx.send((chunkpos, chunkptr)).is_err() {
@@ -123,10 +196,12 @@ fn chunks_load(
             let Some(chunkptr) = chunkptr else {
                 continue;
             };
-            let entity = {
-                let guard = crate::util::lock_arc(&chunkptr);
-                guard.entity
-            };
+            if let Ok(store) = ChunkStore::new(&active_world) {
+                if let Err(err) = store.save_chunk(chunkptr.as_ref()) {
+                    warn!("Failed to save chunk {} in world '{}': {}", chunkpos, active_world.name, err);
+                }
+            }
+            let entity = chunkptr.as_ref().entity;
             cmds.entity(entity).despawn();
 
             net_server.broadcast_packet(&SPacket::ChunkDel { chunkpos });
@@ -136,6 +211,14 @@ fn chunks_load(
             }
 
             info!("Chunk Unloaded {}", chunk_sys.num_chunks());
+        }
+    }
+
+    if save_req.save_now {
+        save_req.save_now = false;
+        match ChunkStore::new(&active_world).and_then(|store| store.save_world(chunk_sys.get_chunks())) {
+            Ok(()) => info!("Manual world save completed for '{}'", active_world.name),
+            Err(err) => warn!("Manual world save failed for '{}': {}", active_world.name, err),
         }
     }
 

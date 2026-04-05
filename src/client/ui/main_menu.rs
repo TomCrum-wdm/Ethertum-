@@ -190,6 +190,8 @@ pub fn ui_pause_menu(
     mut player: ResMut<ClientPlayerInfo>,
     mut inv_ui_state: ResMut<super::items::InventoryUiState>,
     items: Option<Res<crate::item::Items>>,
+    time: Res<Time>,
+    mut last_save_feedback: Local<f32>,
     // mut net_client: ResMut<RenetClient>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
@@ -249,10 +251,23 @@ pub fn ui_pause_menu(
                 if ui.toggle_value(&mut false, "Settings").clicked() {
                     cli.data().curr_ui = CurrentUI::Settings;
                 }
+<<<<<<< HEAD
+=======
+
+                if ui.toggle_value(&mut false, "Save World").clicked() {
+                    cli.request_save_world();
+                    *last_save_feedback = time.elapsed_secs();
+                }
+
+>>>>>>> feature/world-persistence-8073199
                 if ui.toggle_value(&mut false, "Quit").clicked() {
                     cli.exit_world();
                 }
             });
+
+            if *last_save_feedback > 0.0 && time.elapsed_secs() - *last_save_feedback < 2.0 {
+                ui.small("World save requested");
+            }
         });
 
     // return;

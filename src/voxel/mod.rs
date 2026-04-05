@@ -10,6 +10,19 @@ mod voxel_server;
 mod render;
 
 pub use chunk::Chunk;
+pub use chunk_storage::{
+    ActiveWorld,
+    ChunkStore,
+    LocalWorldInfo,
+    WorldStorage,
+    WorldMeta,
+    WorldSaveRequest,
+    create_world,
+    delete_world,
+    list_worlds,
+    sanitize_world_name,
+    saves_root_dir,
+};
 pub use render::{TerrainMaterial};
 pub use vox::{Vox, VoxShape, VoxTex, VoxLight,};
 pub use voxel_client::{ClientChunkSystem, ClientVoxelPlugin, HitResult, VoxelBrush};

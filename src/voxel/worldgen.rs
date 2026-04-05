@@ -11,6 +11,7 @@ use crate::client::settings::{ClientSettings, TerrainMode};
 // use crate::client::settings::ClientSettings;
 
 pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
+<<<<<<< HEAD
     // Backwards-compatible wrapper: use default planet params
     let planet_center = IVec3::new(0, 512, 0);
     let planet_radius: f32 = 512.0;
@@ -26,6 +27,12 @@ pub fn generate_chunk_with_params(
     shell_thickness: f32,
 ) {
     let seed = 100;
+=======
+    generate_chunk_with_seed(chunk, settings, 100);
+}
+
+pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, seed: u32) {
+>>>>>>> feature/world-persistence-8073199
     // let perlin = Perlin::new(seed);
     let mut fbm = Fbm::<Perlin>::new(seed);
     // fbm.frequency = 0.2;
@@ -113,23 +120,10 @@ pub fn populate_chunk(chunk: &mut Chunk) {
                     air_dist += 1;
                 }
                 if c.tex_id == VoxTex::Stone {
-                    let mut replace = c.tex_id;
-                    if p.y < 2 && air_dist <= 2 && perlin.get([p.x as f64 / 32., p.z as f64 / 32.]) > 0.1 {
-                        replace = VoxTex::Sand;
-                    } else if air_dist <= 1 {
-                        replace = VoxTex::Grass;
-                    } else if air_dist < 3 {
-                        replace = VoxTex::Dirt;
+                        generate_chunk_with_seed(chunk, settings, 100);
                     }
-                    c.tex_id = replace;
-                }
-            }
-        }
-    }
 
-    for lx in 0..Chunk::LEN {
-        for lz in 0..Chunk::LEN {
-            let x = chunkpos.x + lx;
+                    pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, seed: u32) {
             let z = chunkpos.z + lz;
 
             // TallGrass

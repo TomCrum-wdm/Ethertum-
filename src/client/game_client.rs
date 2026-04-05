@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::ToSocketAddrs;
 
 use bevy::{ecs::system::SystemParam, math::vec3, prelude::*};
@@ -12,9 +13,10 @@ use bevy_atmosphere::prelude::*;
 use crate::client::prelude::*;
 use crate::item::ItemPlugin;
 use crate::net::{CPacket, ClientNetworkPlugin, RenetClientHelper};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::server::prelude::IntegratedServerPlugin;
 use crate::ui::prelude::*;
-use crate::voxel::ClientVoxelPlugin;
+use crate::voxel::{ActiveWorld, ClientVoxelPlugin, WorldSaveRequest};
 
 pub struct ClientGamePlugin;
 
@@ -63,6 +65,7 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
+<<<<<<< HEAD
         #[cfg(target_os = "android")]
         let enable_integrated_server = matches!(
             std::env::var("ETHERTIA_ANDROID_INTEGRATED_SERVER"),
@@ -76,6 +79,11 @@ impl Plugin for ClientGamePlugin {
         } else {
             info!("IntegratedServerPlugin disabled on Android by default");
         }
+=======
+        // Integrated local server is unavailable on wasm runtime.
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(IntegratedServerPlugin);
+>>>>>>> feature/world-persistence-8073199
         
         // ClientInfo
         app.insert_resource(ClientInfo::default());
@@ -317,54 +325,34 @@ impl<'w, 's> EthertiaClient<'w, 's> {
     pub fn connect_server(&mut self, server_addr: String) {
         info!("Connecting to {}", server_addr);
 
-        let mut addrs = match server_addr.trim().to_socket_addrs() {
-            Ok(addrs) => addrs.collect::<Vec<_>>(),
-            Err(err) => {
-                error!("Failed to resolve DNS of server_addr: {}", err);
-                self.data().curr_ui = CurrentUI::DisconnectedReason;
-                return;
-            }
-        };
-        let addr = match addrs.pop() {
-            Some(addr) => addr,
-            None => {
-                self.data().curr_ui = CurrentUI::DisconnectedReason;
-                return;
-            }
-        };
-
-        self.data().curr_ui = CurrentUI::ConnectingServer;
-        self.clientinfo.server_addr.clone_from(&server_addr);
-
-        let mut net_client = RenetClient::new(bevy_renet::renet::ConnectionConfig::default());
-
-        let username = &self.cfg.username;
-        net_client.send_packet(&CPacket::Login {
-            uuid: crate::util::hashcode(username),
-            access_token: 123,
-            username: username.clone(),
-        });
-
-        self.cmds.insert_resource(net_client);
-
-        match crate::net::new_netcode_client_transport(
-            addr,
-            Some("userData123".to_string().into_bytes()),
-        ) {
-            Ok(transport) => {
-                self.cmds.insert_resource(transport);
-            }
-            Err(err) => {
-                error!("Failed to establish connection to {}: {}", server_addr, err);
-                self.data().disconnected_reason = format!("Connection failed: {}", err);
-                self.data().curr_ui = CurrentUI::DisconnectedReason;
-                return;
-            }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = server_addr;
+            self.data().disconnected_reason = "Networking is unavailable on this runtime".to_string();
+            self.data().curr_ui = CurrentUI::DisconnectedReason;
+            warn!("connect_server is not supported on wasm32 runtime");
+            return;
         }
 
-        // clear DisconnectReason on new connect, to prevents display old invalid reason.
-        self.clientinfo.disconnected_reason.clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut addrs = match server_addr.trim().to_socket_addrs() {
+                Ok(addrs) => addrs.collect::<Vec<_>>(),
+                Err(err) => {
+                    error!("Failed to resolve DNS of server_addr: {}", err);
+                    self.data().curr_ui = CurrentUI::DisconnectedReason;
+                    return;
+                }
+            };
+            let addr = match addrs.pop() {
+                Some(addr) => addr,
+                None => {
+                    self.data().curr_ui = CurrentUI::DisconnectedReason;
+                    return;
+                }
+            };
 
+<<<<<<< HEAD
         // 提前初始化世界 以防用资源时 发现没有被初始化
         let mut wi = WorldInfo::default();
         wi.terrain_mode = self.cfg.terrain_mode;
@@ -374,6 +362,79 @@ impl<'w, 's> EthertiaClient<'w, 's> {
         wi.gravity_accel = self.cfg.gravity_accel;
         wi.recompute_params_hash();
         self.cmds.insert_resource(wi);
+=======
+            self.data().curr_ui = CurrentUI::ConnectingServer;
+            self.clientinfo.server_addr.clone_from(&server_addr);
+
+            let mut net_client = RenetClient::new(bevy_renet::renet::ConnectionConfig::default());
+
+            let username = &self.cfg.username;
+            net_client.send_packet(&CPacket::Login {
+                uuid: crate::util::hashcode(username),
+                access_token: 123,
+                username: username.clone(),
+            });
+
+            self.cmds.insert_resource(net_client);
+
+            match crate::net::new_netcode_client_transport(
+                addr,
+                Some("userData123".to_string().into_bytes()),
+            ) {
+                Ok(transport) => {
+                    self.cmds.insert_resource(transport);
+                }
+                Err(err) => {
+                    error!("Failed to establish connection to {}: {}", server_addr, err);
+                    self.data().disconnected_reason = format!("Connection failed: {}", err);
+                    self.data().curr_ui = CurrentUI::DisconnectedReason;
+                    return;
+                }
+            }
+
+            // clear DisconnectReason on new connect, to prevents display old invalid reason.
+            self.clientinfo.disconnected_reason.clear();
+
+            // 提前初始化世界资源，避免后续网络包先到导致缺资源。
+            self.cmds.queue(|world: &mut World| {
+                if !world.contains_resource::<WorldInfo>() {
+                    world.insert_resource(WorldInfo::default());
+                }
+            });
+        }
+    }
+
+    pub fn select_active_world(&mut self, world_name: String, seed: u64) {
+        let mut world_info = WorldInfo::default();
+        world_info.name = world_name.clone();
+        world_info.seed = seed;
+
+        self.cmds.insert_resource(ActiveWorld {
+            name: world_name,
+            seed,
+        });
+        self.cmds.insert_resource(world_info);
+    }
+
+    pub fn connect_local_world(&mut self, world_name: String, seed: u64, port: u16) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (world_name, seed, port);
+            self.data().disconnected_reason = "Local play is unavailable on this runtime".to_string();
+            self.data().curr_ui = CurrentUI::DisconnectedReason;
+            return;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.select_active_world(world_name, seed);
+            self.connect_server(format!("127.0.0.1:{}", port));
+        }
+    }
+
+    pub fn request_save_world(&mut self) {
+        self.cmds.insert_resource(WorldSaveRequest { save_now: true });
+>>>>>>> feature/world-persistence-8073199
     }
 
     pub fn enter_world(&mut self) {
@@ -421,10 +482,14 @@ impl<'w, 's> EthertiaClient<'w, 's> {
     }
 
     pub fn exit_world(&mut self) {
+<<<<<<< HEAD
         // attempt to persist world meta before removing resource
         if let Some(mut w) = self.worldinfo.as_mut() {
             crate::client::client_world::save_world_meta_to_disk(&*w);
         }
+=======
+        self.request_save_world();
+>>>>>>> feature/world-persistence-8073199
         self.cmds.remove_resource::<WorldInfo>();
         self.data().curr_ui = CurrentUI::MainMenu;
     }
