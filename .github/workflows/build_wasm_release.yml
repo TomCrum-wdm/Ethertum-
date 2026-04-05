@@ -10,6 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: nightly-2025-10-16
 
 jobs:
   build:
@@ -28,9 +29,18 @@ jobs:
           node-version: "20"
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2025-10-16
           targets: wasm32-unknown-unknown
+
+      - name: Verify Rust Toolchain And WASM Target
+        run: |
+          set -euxo pipefail
+          rustup show active-toolchain
+          rustup target add wasm32-unknown-unknown --toolchain nightly-2025-10-16
+          rustup target list --installed --toolchain nightly-2025-10-16 | grep wasm32-unknown-unknown
+          rustc +nightly-2025-10-16 -Vv
 
       - name: Install Dependencies
         run: |
@@ -184,5 +194,3 @@ jobs:
       #       This is the release of ${APP_NAME}.
       #     draft: false
       #     prerelease: true
-
-
