@@ -58,7 +58,20 @@ jobs:
             curl \
             python3
 
-          cargo install -f wasm-bindgen-cli
+          WBG_VERSION=$(python3 - <<'PY'
+          import pathlib, re
+
+          text = pathlib.Path("Cargo.lock").read_text(encoding="utf-8")
+          match = re.search(r'\[\[package\]\]\nname = "wasm-bindgen-shared"\nversion = "([^"]+)"', text)
+          if not match:
+              raise SystemExit("Unable to find wasm-bindgen-shared version in Cargo.lock")
+          print(match.group(1))
+          PY
+          )
+
+          echo "Installing wasm-bindgen-cli version: ${WBG_VERSION}"
+          cargo install -f wasm-bindgen-cli --version "${WBG_VERSION}"
+          wasm-bindgen --version | grep "${WBG_VERSION}"
           # sudo apt install binaryen   # install for wasm-opt
 
       - name: Run Native Storage Tests
