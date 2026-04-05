@@ -31,7 +31,9 @@ impl ItemStack {
     }
 
     pub fn swap(a: &mut Self, b: &mut Self) {
-        std::mem::swap(a, b);
+        let tmp = *a;
+        *a = *b;
+        *b = tmp;
     }
 }
 
@@ -82,32 +84,11 @@ impl Plugin for ItemPlugin {
         app.insert_resource(Items::default());
         // app.insert_resource(Registry::default());
 
-        // On Android, defer heavy startup registration work by a couple of frames
-        // to ensure the first frame can be presented and system splash can exit.
-        app.add_systems(Update, setup_items_deferred);
+        app.add_systems(Startup, setup_items);
         app.add_systems(bevy_egui::EguiPrimaryContextPass, setup_items_egui);
 
         // app.add_systems(PostStartup, bake_items);
     }
-}
-
-fn setup_items_deferred(
-    mut initialized: Local<bool>,
-    mut defer_frames: Local<u8>,
-    items: ResMut<Items>,
-    asset_server: Res<AssetServer>,
-) {
-    if *initialized {
-        return;
-    }
-
-    if cfg!(target_os = "android") && *defer_frames < 2 {
-        *defer_frames += 1;
-        return;
-    }
-
-    setup_items(items, asset_server);
-    *initialized = true;
 }
 
 #[derive(Resource, Default)]
@@ -139,43 +120,43 @@ fn setup_items(
     let mut defs = Vec::new();
 
     // 方块类物品注册及物理属性
-    let _stone = reg.insert("stone");
+    let stone = reg.insert("stone");
     defs.push(ItemDef {
         name: "stone".to_string(),
         props: MaterialProps { mass: 2.6, volume: 0.001, density: 2600.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _dirt = reg.insert("dirt");
+    let dirt = reg.insert("dirt");
     defs.push(ItemDef {
         name: "dirt".to_string(),
         props: MaterialProps { mass: 1.2, volume: 0.001, density: 1200.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _grass = reg.insert("grass");
+    let grass = reg.insert("grass");
     defs.push(ItemDef {
         name: "grass".to_string(),
         props: MaterialProps { mass: 1.1, volume: 0.001, density: 1100.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _sand = reg.insert("sand");
+    let sand = reg.insert("sand");
     defs.push(ItemDef {
         name: "sand".to_string(),
         props: MaterialProps { mass: 1.6, volume: 0.001, density: 1600.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _log = reg.insert("log");
+    let log = reg.insert("log");
     defs.push(ItemDef {
         name: "log".to_string(),
         props: MaterialProps { mass: 0.7, volume: 0.001, density: 700.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _leaves = reg.insert("leaves");
+    let leaves = reg.insert("leaves");
     defs.push(ItemDef {
         name: "leaves".to_string(),
         props: MaterialProps { mass: 0.3, volume: 0.001, density: 300.0, molar_mass: 0.0 },
         category: ItemCategory::Main,
     });
-    let _water = reg.insert("water");
+    let water = reg.insert("water");
     defs.push(ItemDef {
         name: "water".to_string(),
         props: MaterialProps { mass: 1.0, volume: 0.001, density: 1000.0, molar_mass: 18.0 },
@@ -235,14 +216,6 @@ fn setup_items(
         props: MaterialProps { mass: 0.8, volume: 0.0015, density: 7800.0, molar_mass: 0.0 },
         category: ItemCategory::Secondary,
     });
-
-    let _circuit_board = reg.insert("circuit_board");
-    defs.push(ItemDef {
-        name: "circuit_board".to_string(),
-        props: MaterialProps { mass: 0.05, volume: 0.0001, density: 1200.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-
     let iron_ingot = reg.insert("iron_ingot");
     defs.push(ItemDef {
         name: "iron_ingot".to_string(),
@@ -265,7 +238,6 @@ fn setup_items(
 
     items.atlas = asset_server.load("baked/items.png");
     items.defs = defs;
-    // 可选：如需全局引用circuit_board，可加 pub circuit_board: RegId
 }
 
 fn setup_items_egui(

@@ -23,13 +23,9 @@ pub enum SettingsPanel {
 
 
 pub fn ui_setting_line(ui: &mut Ui, text: impl Into<egui::RichText>, widget: impl Widget) {
-    ui_setting_line_colored(ui, text, widget, Color32::WHITE);
-}
-
-pub fn ui_setting_line_colored(ui: &mut Ui, text: impl Into<egui::RichText>, widget: impl Widget, color: Color32) {
     ui.horizontal(|ui| {
         ui.add_space(20.);
-        ui.colored_label(color, text);
+        ui.colored_label(Color32::WHITE, text);
         let end_width = 150.;
         let end_margin = 8.;
         let line_margin = 10.;
@@ -52,8 +48,6 @@ pub fn ui_settings(
     mut cli: ResMut<ClientInfo>,
     mut cfg: ResMut<ClientSettings>,
     mut worldinfo: Option<ResMut<WorldInfo>>,
-    mut cmds: Commands,
-    mut chunk_sys: Option<ResMut<crate::voxel::ClientChunkSystem>>,
     //mut egui_settings: ResMut<EguiSettings>,
     mut query_char: Query<&mut CharacterController>,
     // chunk_sys: Option<ResMut<ClientChunkSystem>>,
@@ -97,30 +91,45 @@ pub fn ui_settings(
 
                 match curr_settings_panel {
                     SettingsPanel::General => {
-                        // 蓝色分组
-                        let blue = Color32::from_rgb(80, 160, 255);
-                        let rainbow = Color32::from_rgb(255, 120, 0); // 彩虹色可后续细化
-                        let _danger = Color32::RED;
+                        ui.label("Profile: ");
 
-                        ui.colored_label(blue, "Profile: ");
-                        ui_setting_line_colored(ui, "Username", egui::TextEdit::singleline(&mut cfg.username), blue);
-                        ui_setting_line_colored(ui, "Touch UI (large buttons)", egui::Checkbox::new(&mut cfg.touch_ui, ""), blue);
+                        ui_setting_line(ui, "Username", egui::TextEdit::singleline(&mut cfg.username));
+                        ui_setting_line(ui, "Touch UI (large buttons)", egui::Checkbox::new(&mut cfg.touch_ui, ""));
 
-                        ui.add_space(12.);
-                        if ui.add(egui::Button::new("编辑器模式 / 上帝模式").fill(rainbow)).clicked() {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/bevyengine/bevy_editor_pls"));
-                        }
-                        if ui.add(egui::Button::new("电路板实验室").fill(rainbow)).clicked() {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/Dreamtowards/Ethertum/tree/main/assets/test/comp/circuit"));
-                        }
+                        // ui.group(|ui| {
+                        //     ui.horizontal(|ui| {
+                        //         ui.vertical(|ui| {
+                        //             ui.colored_label(Color32::WHITE, cli.cfg.username.clone());
+                        //             ui.small("ref.dreamtowards@gmail.com");
+                        //         });
 
-                        ui.colored_label(blue, "Voxel:");
-                        ui_setting_line_colored(ui, "Chunk Load Distance X", egui::Slider::new(&mut cfg.chunks_load_distance.x, -1..=25), blue);
-                        ui_setting_line_colored(ui, "Chunk Load Distance Y", egui::Slider::new(&mut cfg.chunks_load_distance.y, -1..=25), blue);
+                        //         ui.with_layout(Layout::right_to_left(egui::Align::TOP), |ui| {
+                        //             ui.button("Log out").clicked();
+                        //             if ui.button("Account Info").clicked() {
+                        //                 ui.ctx().open_url(egui::OpenUrl::new_tab("https://ethertia.com/profile/uuid"));
+                        //             }
+                        //         });
+                        //     });
 
-                        ui.colored_label(blue, "地形模式:");
-                        // Detect mode change so we can clear chunks and force regen when switching between Planet/Flat
-                        let prev_mode = cfg.terrain_mode;
+                        //     // if ui.button("Switch Account").clicked() {
+                        //     //     ui.ctx().open_url(egui::OpenUrl::new_tab("https://auth.ethertia.com/login?client"));
+                        //     // }
+                        // });
+
+                        // ui.label("General:");
+
+                        ui.label("Voxel:");
+
+                        // ui_setting_line(
+                        //     ui,
+                        //     "Chunks Meshing Max Concurrency",
+                        //     egui::Slider::new(&mut chunk_sys.max_concurrent_meshing, 0..=50),
+                        // );
+
+                        ui_setting_line(ui, "Chunk Load Distance X", egui::Slider::new(&mut cfg.chunks_load_distance.x, -1..=25));
+                        ui_setting_line(ui, "Chunk Load Distance Y", egui::Slider::new(&mut cfg.chunks_load_distance.y, -1..=25));
+
+                        ui.label("地形模式:");
                         ui.horizontal(|ui| {
                             let mode = &mut cfg.terrain_mode;
                             let planet = *mode == crate::client::settings::TerrainMode::Planet;
@@ -132,57 +141,21 @@ pub fn ui_settings(
                                 *mode = crate::client::settings::TerrainMode::Flat;
                             }
                         });
-                        // Sync setting into live WorldInfo if world is loaded
-                        if let Some(w) = &mut worldinfo {
-                            w.terrain_mode = cfg.terrain_mode;
-                            w.planet_center = Vec3::new(cfg.planet_center[0], cfg.planet_center[1], cfg.planet_center[2]);
-                            w.planet_radius = cfg.planet_radius;
-                            w.planet_shell_thickness = cfg.planet_shell_thickness;
-                            w.gravity_accel = cfg.gravity_accel;
-                        }
-                        // If mode changed, clear existing client chunks so they will be regenerated under new mode
-                        if prev_mode != cfg.terrain_mode {
-                            if let Some(cs_mut) = chunk_sys.as_mut() {
-                                let keys: Vec<_> = cs_mut.chunks.keys().cloned().collect();
-                                for cp in keys {
-                                    if let Some(chunkptr) = cs_mut.despawn_chunk(cp, &mut cmds) {
-                                            if let Some(w) = &worldinfo {
-                                                let guard = crate::util::lock_arc(&chunkptr);
-                                                let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, Some(w.name.clone()), w.seed);
-                                            } else {
-                                                let guard = crate::util::lock_arc(&chunkptr);
-                                                let _ = crate::voxel::chunk_storage::spawn_save_chunk_from_chunk(&*guard, None, 0);
-                                            }
-                                    }
-                                }
-                            }
-                        }
-                        if cfg.terrain_mode == crate::client::settings::TerrainMode::Planet {
-                            ui.add_space(6.);
-                            ui.colored_label(Color32::from_rgb(200, 220, 255), "自定义星球参数:");
-                            ui_setting_line_colored(ui, "中心 X", egui::DragValue::new(&mut cfg.planet_center[0]).speed(1.0), Color32::from_rgb(200, 220, 255));
-                            ui_setting_line_colored(ui, "中心 Y", egui::DragValue::new(&mut cfg.planet_center[1]).speed(1.0), Color32::from_rgb(200, 220, 255));
-                            ui_setting_line_colored(ui, "中心 Z", egui::DragValue::new(&mut cfg.planet_center[2]).speed(1.0), Color32::from_rgb(200, 220, 255));
-                            ui_setting_line_colored(ui, "半径", egui::DragValue::new(&mut cfg.planet_radius).speed(1.0), Color32::from_rgb(200, 220, 255));
-                            ui_setting_line_colored(ui, "壳厚度", egui::DragValue::new(&mut cfg.planet_shell_thickness).speed(1.0), Color32::from_rgb(200, 220, 255));
-                            ui_setting_line_colored(ui, "重力 (m/s²)", egui::DragValue::new(&mut cfg.gravity_accel).speed(0.1), Color32::from_rgb(200, 220, 255));
-                            // Also apply to live WorldInfo
-                            if let Some(w) = &mut worldinfo {
-                                w.planet_center = Vec3::new(cfg.planet_center[0], cfg.planet_center[1], cfg.planet_center[2]);
-                                w.planet_radius = cfg.planet_radius;
-                                w.planet_shell_thickness = cfg.planet_shell_thickness;
-                                w.gravity_accel = cfg.gravity_accel;
-                            }
-                        }
                         ui.separator();
-                        ui.colored_label(blue, "Voxel Brush:");
-                        ui_setting_line_colored(ui, "Size", egui::Slider::new(&mut vox_brush.size, 0.0..=20.0), blue);
-                        ui_setting_line_colored(ui, "Indensity", egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0), blue);
-                        ui_setting_line_colored(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25), blue);
+                        ui.label("Voxel Brush:");
 
-                        if let Some(def) = items.defs.first() {
+                        ui_setting_line(ui, "Size", egui::Slider::new(&mut vox_brush.size, 0.0..=20.0));
+
+                        ui_setting_line(ui, "Indensity", egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0));
+
+                        // ui_setting_line(ui, "Shape", egui::Slider::new(&mut vox_brush.shape, 0..=5));
+
+                        ui_setting_line(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25));
+
+                        // 新增：示例显示第一个物品的物理属性（后续可完善为热栏/背包界面显示）
+                        if let Some(def) = items.defs.get(0) {
                             ui.separator();
-                            ui.colored_label(rainbow, format!("物品: {}", def.name));
+                            ui.label(format!("物品: {}", def.name));
                             ui.label(format!("质量: {:.3} kg", def.props.mass));
                             ui.label(format!("体积: {:.5} m³", def.props.volume));
                             ui.label(format!("密度: {:.1} kg/m³", def.props.density));
@@ -190,46 +163,29 @@ pub fn ui_settings(
                         }
 
                         if let Some(worldinfo) = &mut worldinfo {
-                            ui.colored_label(blue, "World:");
-                            ui_setting_line_colored(ui, "Day Time", egui::Slider::new(&mut worldinfo.daytime, 0.0..=1.0), blue);
-                            ui_setting_line_colored(ui, "Day Time Length", egui::Slider::new(&mut worldinfo.daytime_length, 0.0..=60.0 * 24.0), blue);
+                            ui.label("World:");
+                            ui_setting_line(ui, "Day Time", egui::Slider::new(&mut worldinfo.daytime, 0.0..=1.0));
+                            ui_setting_line(ui, "Day Time Length", egui::Slider::new(&mut worldinfo.daytime_length, 0.0..=60.0 * 24.0));
                         }
+                        
+                        ui.label("Video:");
 
-                        ui.colored_label(blue, "Video:");
-                        ui_setting_line_colored(ui, "FOV", egui::Slider::new(&mut cfg.fov, 10.0..=170.0), blue);
-                        ui_setting_line_colored(ui, "VSync", egui::Checkbox::new(&mut cfg.vsync, ""), blue);
+                        ui_setting_line(ui, "FOV", egui::Slider::new(&mut cfg.fov, 10.0..=170.0));
 
-                        ui.colored_label(blue, "UI");
-                        ui_setting_line_colored(ui, "HUD Padding", egui::Slider::new(&mut cfg.hud_padding, 0.0..=48.0), blue);
+                        ui_setting_line(ui, "VSync", egui::Checkbox::new(&mut cfg.vsync, ""));
 
-                        ui.colored_label(blue, "Controls");
+                        ui.label("UI");
+
+                        //ui_setting_line(ui, "UI Scale", egui::Slider::new(&mut egui_settings.scale_factor, 0.5..=2.5));
+
+                        ui_setting_line(ui, "HUD Padding", egui::Slider::new(&mut cfg.hud_padding, 0.0..=48.0));
+                        
+                        ui.label("Controls");
                         if let Ok(mut ctl) = query_char.single_mut() {
-                            ui_setting_line_colored(ui, "Unfly on Grounded", egui::Checkbox::new(&mut ctl.unfly_on_ground, ""), blue);
+                            ui_setting_line(ui, "Unfly on Grounded", egui::Checkbox::new(&mut ctl.unfly_on_ground, ""));
                         }
                     }
                     SettingsPanel::CurrentWorld => {
-                        ui.colored_label(Color32::from_rgb(200, 220, 255), "当前存档:");
-                        if let Some(w) = &worldinfo {
-                            ui.label(format!("Name: {}", w.name));
-                            ui.label(format!("Seed: {:016x}", w.seed));
-                            ui.add_space(6.);
-                            if ui.add(egui::Button::new("导出存档 (Zip)" )).clicked() {
-                                // Run export in background to avoid blocking the UI/main thread.
-                                let world_name = w.name.clone();
-                                let seed = w.seed;
-                                let handle = crate::voxel::chunk_storage::spawn_export_world_save(Some(world_name.clone()), seed);
-                                // Detach: spawn a watcher thread that joins and logs result when ready.
-                                std::thread::spawn(move || {
-                                    match handle.join() {
-                                        Ok(Some(path)) => info!("Exported world to {:?}", path),
-                                        Ok(None) => warn!("Export failed for world {}", world_name),
-                                        Err(e) => warn!("Export thread panicked: {:?}", e),
-                                    }
-                                });
-                            }
-                        } else {
-                            ui.label("未加载世界");
-                        }
                     }
                     SettingsPanel::Graphics => {
                         ui.label("Render Effects");

@@ -28,8 +28,7 @@ pub use vox::{Vox, VoxShape, VoxTex, VoxLight,};
 pub use voxel_client::{ClientChunkSystem, ClientVoxelPlugin, HitResult, VoxelBrush};
 pub use voxel_server::{ServerChunkSystem, ServerVoxelPlugin};
 
-use std::sync::Mutex;
-pub type ChunkPtr = Arc<Mutex<Chunk>>;
+pub type ChunkPtr = Arc<Chunk>;
 
 use crate::util::AsMutRef;
 use bevy::{prelude::*, platform::collections::HashMap};
@@ -75,24 +74,14 @@ pub trait ChunkSystem {
         self.get_chunks().len()
     }
 
-    fn get_voxel(&self, p: IVec3) -> Option<Vox> {
+    fn get_voxel(&self, p: IVec3) -> Option<&Vox> {
         let chunkptr = self.get_chunk(Chunk::as_chunkpos(p))?;
-        let guard = crate::util::lock_arc(chunkptr);
-        Some(*guard.at_voxel(Chunk::as_localpos(p)))
+
+        Some(chunkptr.at_voxel(Chunk::as_localpos(p)))
     }
 
-    fn get_voxel_mut(&self, p: IVec3) -> Option<Vox> {
-        // Return a copy of the voxel for callers that previously took a mutable
-        // reference. To mutate the chunk, callers should lock the chunk and use
-        // `at_voxel_mut` or `set_voxel_rel`.
-        self.get_voxel(p)
-    }
-
-    /// Set voxel at global position `p` to value `v`. Returns the previous voxel if present.
-    fn set_voxel(&self, p: IVec3, v: Vox) -> Option<Vox> {
-        let chunkptr = self.get_chunk(Chunk::as_chunkpos(p))?;
-        let mut guard = crate::util::lock_arc(chunkptr);
-        Some(guard.set_voxel_rel(Chunk::as_localpos(p), |vox| { *vox = v; })?)
+    fn get_voxel_mut(&self, p: IVec3) -> Option<&mut Vox> {
+        self.get_voxel(p).map(|v| v.as_mut())
     }
 }
 

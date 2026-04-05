@@ -5,8 +5,7 @@ mod main_menu;
 pub mod serverlist;
 mod settings;
 
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 pub mod prelude {
     pub use super::items::{ui_inventory, ui_item_stack};
@@ -28,85 +27,14 @@ use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{ScreenSpaceReflections};
 use bevy_egui::{egui::{
-    self, Align2, Color32, FontData, FontDefinitions, FontFamily, Layout, Pos2, Response, Ui, WidgetText,
-}, EguiContextSettings, EguiContexts, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
+    self, style::HandleShape, Align2, Color32, FontData, FontDefinitions, FontFamily, Layout, Pos2, Response, Rounding, Stroke, Ui, WidgetText,
+}, EguiContextSettings, EguiContexts, EguiGlobalSettings, EguiMultipassSchedule, EguiPlugin, EguiPrimaryContextPass, EguiStartupSet, PrimaryEguiContext};
 use egui_extras::{Size, StripBuilder};
+use rand::Rng;
 
 use crate::client::prelude::*;
 
 pub struct UiPlugin;
-
-// Resource that holds system font bytes loaded in background (Arc+Mutex for thread passback)
-#[derive(Resource)]
-struct SysFontBytes(Arc<Mutex<Option<Vec<u8>>>>);
-
-impl Default for SysFontBytes {
-    fn default() -> Self {
-        SysFontBytes(Arc::new(Mutex::new(None)))
-    }
-}
-
-// Spawn a background thread at startup to load Android system fallback font if present.
-fn spawn_sys_font_loader(sys_font: Res<SysFontBytes>) {
-    if cfg!(target_os = "android") {
-        let arc = sys_font.0.clone();
-        std::thread::spawn(move || {
-            match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
-                Ok(bytes) => {
-                    log::info!("[UI] Android系统字体后台加载成功, 大小: {} 字节", bytes.len());
-                    if let Ok(mut lock) = arc.lock() {
-                        *lock = Some(bytes);
-                    }
-                }
-                Err(e) => {
-                    log::warn!("[UI] Android系统字体后台加载失败: {}", e);
-                }
-            }
-        });
-    }
-}
-
-// Apply loaded system font when available by merging and calling set_fonts on the Egui context.
-fn apply_sys_font_system(sys_font: Res<SysFontBytes>, mut contexts: EguiContexts) {
-    let maybe_bytes = match sys_font.0.try_lock() {
-        Ok(lock) => lock.clone(),
-        // Skip this frame if another thread is writing font bytes.
-        Err(_) => return,
-    };
-    if let Some(bytes) = maybe_bytes {
-        // Rebuild FontDefinitions similar to initial setup but include the loaded noto fallback.
-        let mut fonts = FontDefinitions::default();
-        fonts.font_data.insert(
-            "my_font".to_owned(),
-            Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/menlo.ttf"))),
-        );
-        fonts.font_data.insert("noto_sans_sc".to_owned(), Arc::new(FontData::from_owned(bytes)));
-
-        if let Some(fam) = fonts.families.get_mut(&FontFamily::Proportional) {
-            fam.insert(0, "my_font".to_owned());
-            fam.push("noto_sans_sc".to_owned());
-        }
-        if let Some(fam) = fonts.families.get_mut(&FontFamily::Monospace) {
-            fam.push("my_font".to_owned());
-            fam.push("noto_sans_sc".to_owned());
-        }
-
-        match contexts.ctx_mut() {
-            Ok(mut ctx) => {
-                ctx.set_fonts(fonts);
-                log::info!("[UI] 已应用后台加载的系统字体作为回退字体");
-            }
-            Err(e) => {
-                log::warn!("[UI] apply_sys_font_system: set_fonts 失败: {:?}", e);
-            }
-        }
-
-        // Clear stored bytes so we don't reapply repeatedly
-        if let Ok(mut lock) = sys_font.0.try_lock() {
-            *lock = None;
-        }
-    }
-}
 
 #[derive(Default, Resource)]
 struct UiState {
@@ -116,7 +44,6 @@ struct UiState {
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>();
-        app.init_resource::<SysFontBytes>();
         app.init_resource::<items::InventoryUiState>();
         app.insert_resource(hud::ChatHistory::default());
         if !app.is_plugin_added::<EguiPlugin>() {
@@ -131,10 +58,9 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Startup,
-                (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system, spawn_sys_font_loader),
+                (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system),
             )
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
-            .add_systems(Update, apply_sys_font_system)
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
             .add_systems(Update, sync_camera_render_effects_system)
             .add_systems(Update, items::flush_inventory_ui_ops.run_if(condition::in_world))
@@ -167,15 +93,11 @@ impl Plugin for UiPlugin {
 
         app.add_systems(First, play_bgm);
 
-        // 注册编辑器插件（上帝模式/自由相机/编辑器）
         app.add_plugins((
             FrameTimeDiagnosticsPlugin::default(),
             EntityCountDiagnosticsPlugin::default(),
             // SystemInformationDiagnosticsPlugin,
         ));
-
-        #[cfg(feature = "bevy_editor_pls")]
-        app.add_plugins(crate::client::editor::EditorPlugin);
 
         /*
         // Debug UI
@@ -241,10 +163,8 @@ pub enum CurrentUI {
 }
 
 // Shared UI runtime state that may be touched from multiple systems.
-// Use atomics for simple numeric metrics to avoid lock waits during startup.
-static UI_WINDOW_SIZE_X_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
-static UI_WINDOW_SIZE_Y_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
-static UI_SAFE_TOP_BITS: AtomicU32 = AtomicU32::new(0.0f32.to_bits());
+static UI_WINDOW_SIZE: Mutex<Vec2> = Mutex::new(Vec2::ZERO);
+static UI_SAFE_TOP: Mutex<f32> = Mutex::new(0.0);
 
 struct UiSfxState {
     hovered_id: egui::Id,
@@ -272,23 +192,26 @@ static UI_SFX_STATE: Mutex<UiSfxState> = Mutex::new(UiSfxState {
 });
 
 pub fn set_window_size(size: Vec2) {
-    UI_WINDOW_SIZE_X_BITS.store(size.x.to_bits(), Ordering::Relaxed);
-    UI_WINDOW_SIZE_Y_BITS.store(size.y.to_bits(), Ordering::Relaxed);
+    if let Ok(mut v) = UI_WINDOW_SIZE.lock() {
+        *v = size;
+    }
 }
 
 pub fn set_ui_safe_top(v: f32) {
-    UI_SAFE_TOP_BITS.store(v.max(0.0).to_bits(), Ordering::Relaxed);
+    if let Ok(mut top) = UI_SAFE_TOP.lock() {
+        *top = v.max(0.0);
+    }
 }
 
 pub fn ui_safe_top() -> f32 {
     if cfg!(target_os = "android") {
-        f32::from_bits(UI_SAFE_TOP_BITS.load(Ordering::Relaxed)).max(32.0)
+        UI_SAFE_TOP.lock().map(|v| *v).unwrap_or(42.0).max(32.0)
     } else {
         0.0
     }
 }
 
-pub fn new_egui_window(title: &str) -> egui::Window<'_> {
+pub fn new_egui_window(title: &str) -> egui::Window {
     let size = [680., 420.];
 
     let mut w = egui::Window::new(title)
@@ -298,10 +221,7 @@ pub fn new_egui_window(title: &str) -> egui::Window<'_> {
         .anchor(Align2::CENTER_CENTER, [0., 0.])
         .collapsible(false);
 
-    let window_size = Vec2::new(
-        f32::from_bits(UI_WINDOW_SIZE_X_BITS.load(Ordering::Relaxed)),
-        f32::from_bits(UI_WINDOW_SIZE_Y_BITS.load(Ordering::Relaxed)),
-    );
+    let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
 
     if cfg!(target_os = "android") {
         let safe_top = ui_safe_top();
@@ -566,7 +486,6 @@ fn sync_camera_render_effects_system(
 }
 
 fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
-    
     /*
     contexts.ctx_mut()?.style_mut(|style| {
         let visuals = &mut style.visuals;
@@ -615,7 +534,28 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
         ),
     );
 
-    // 系统字体改为后台异步加载（参见 spawn_sys_font_loader / apply_sys_font_system）
+    // 安卓端优先动态加载系统字体
+    #[cfg(target_os = "android")]
+    let sys_font_bytes = match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
+        Ok(bytes) => {
+            log::info!("[UI] Android系统字体加载成功: /system/fonts/DroidSansFallback.ttf, 大小: {} 字节", bytes.len());
+            Some(bytes)
+        },
+        Err(e) => {
+            log::warn!("[UI] Android系统字体加载失败: {}", e);
+            None
+        }
+    };
+
+    #[cfg(not(target_os = "android"))]
+    let sys_font_bytes: Option<Vec<u8>> = None;
+
+    if let Some(bytes) = sys_font_bytes {
+        fonts.font_data.insert(
+            "noto_sans_sc".to_owned(),
+            std::sync::Arc::new(FontData::from_owned(bytes)),
+        );
+    }
 
     // Put my font first (highest priority):
     fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());
@@ -662,9 +602,9 @@ fn sync_ui_window_metrics_system(query_window: Query<&Window, With<PrimaryWindow
 }
 
 fn ui_example_system(
-    _ui_state: ResMut<UiState>,
+    mut ui_state: ResMut<UiState>,
     mut is_initialized: Local<bool>,
-    _contexts: EguiContexts,
+    mut contexts: EguiContexts,
 ) -> Result {
     if !*is_initialized {
         *is_initialized = true;
@@ -672,8 +612,8 @@ fn ui_example_system(
     Ok(())
 }
 
-fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, _limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
-    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
+fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, mut limbo_played: Local<bool>, mut cli: ResMut<ClientInfo>) {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
         if sfx_state.back_requested {
             sfx_state.back_requested = false;
             cli.curr_ui = CurrentUI::MainMenu;
@@ -702,7 +642,7 @@ fn play_bgm(asset_server: Res<AssetServer>, mut cmds: Commands, _limbo_played: L
     //     });
     // }
 
-    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
         if sfx_state.hovered_id != egui::Id::NULL && sfx_state.hovered_id != sfx_state.last_hovered_id {
             cmds.spawn(
                 AudioPlayer::<AudioSource>(asset_server.load("sounds/ui/button.ogg"))
@@ -752,7 +692,7 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                                 sfx_play(ui.selectable_label(false, "⬅Back"))
                             };
                             if back_resp.clicked() {
-                                if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
+                                if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
                                     sfx_state.back_requested = true;
                                 }
                             }
@@ -769,13 +709,9 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                     let p2 = Pos2::new(p.x, p.y + ui.available_height());
                     ui.painter().line_segment([p, p2], ui.visuals().widgets.noninteractive.bg_stroke);
                 }
-                egui::ScrollArea::vertical()
-                    .max_width(ui.available_width() - 24.0)
-                    .show(ui, |ui| {
-                        add_main(ui);
-                        ui.add_space(32.0); // 允许底部多滚动一段距离
-                    });
-                ui.add_space(16.0); // 右侧整体边距
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    add_main(ui);
+                });
             });
         });
 }
@@ -789,7 +725,7 @@ pub trait UiExtra {
 }
 
 pub fn sfx_play(resp: Response) -> Response {
-    if let Ok(mut sfx_state) = UI_SFX_STATE.try_lock() {
+    if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {
         if resp.hovered() || resp.gained_focus() {
             sfx_state.hovered_id = resp.id;
         }

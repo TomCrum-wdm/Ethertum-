@@ -1,6 +1,11 @@
 use std::f32::consts::PI;
 
-use bevy::light::VolumetricLight;
+use bevy::post_process::bloom::Bloom;
+use bevy::anti_alias::fxaa::Fxaa;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::core_pipeline::Skybox;
+use bevy::pbr::{ScreenSpaceReflections};
+use bevy::light::{VolumetricFog, VolumetricLight};
 use bevy_renet::netcode::NetcodeClientTransport;
 use bevy_renet::renet::RenetClient;
 
@@ -8,7 +13,6 @@ use crate::client::prelude::*;
 use crate::net::{CPacket, RenetClientHelper};
 use crate::prelude::*;
 use crate::util::TimeIntervals;
-use avian3d::prelude::*;
 
 pub fn init(app: &mut App) {
     app.register_type::<WorldInfo>();
@@ -22,8 +26,6 @@ pub fn init(app: &mut App) {
     app.add_systems(First, on_world_init.run_if(condition::load_world)); // Camera, Player, Sun
     app.add_systems(Last, on_world_exit.run_if(condition::unload_world()));
     app.add_systems(Update, tick_world.run_if(condition::in_world)); // Sun, World Timing.
-    // Apply planet-mode radial gravity to dynamic bodies
-    app.add_systems(Update, apply_planet_gravity.run_if(condition::in_world));
 }
 
 #[derive(Resource, Reflect)]
@@ -44,36 +46,8 @@ impl ClientPlayerInfo {
 
 impl Default for ClientPlayerInfo {
     fn default() -> Self {
-        let mut inventory = Inventory::new(36);
-        // 将所有已注册物品都放入物品栏，每种1个。
-        // 由于Items资源未在此处可用，只能硬编码物品数量和顺序，需与item/mod.rs同步。
-        // 当前注册顺序见item/mod.rs setup_items，注意avocado未加入defs，仅注册。
-        let item_ids = [
-            0, // stone
-            1, // dirt
-            2, // grass
-            3, // sand
-            4, // log
-            5, // leaves
-            6, // water
-            7, // apple
-            9, // coal
-            10, // stick
-            11, // frame
-            12, // lantern
-            13, // pickaxe
-            14, // shears
-            15, // grapple
-            16, // circuit_board
-            17, // iron_ingot
-        ];
-        for (i, &item_id) in item_ids.iter().enumerate() {
-            if i < inventory.items.len() {
-                inventory.items[i] = crate::item::ItemStack { count: 1, item_id: item_id as u8 };
-            }
-        }
         Self {
-            inventory,
+            inventory: Inventory::new(36),
             hotbar_index: 0,
             health: 20,
             health_max: 20,
@@ -83,7 +57,7 @@ impl Default for ClientPlayerInfo {
 
 /// the resource only exixts when world is loaded
 
-#[derive(Resource, Reflect, Clone)]
+#[derive(Resource, Reflect)]
 #[reflect(Resource)]
 pub struct WorldInfo {
     pub seed: u64,
@@ -105,23 +79,12 @@ pub struct WorldInfo {
 
     pub is_paused: bool,
     pub paused_steps: i32,
-
-    // World / Planet parameters
-    pub terrain_mode: crate::client::settings::TerrainMode,
-    pub planet_center: bevy::prelude::Vec3,
-    pub planet_radius: f32,
-    pub planet_shell_thickness: f32,
-    pub gravity_accel: f32,
-
-    // Generator/version metadata for compatibility checks
-    pub generator_version: String,
-    pub generator_params_hash: String,
-    pub world_format_version: u32,
+    // pub is_manipulating: bool,
 }
 
 impl Default for WorldInfo {
     fn default() -> Self {
-        let mut wi = WorldInfo {
+        WorldInfo {
             seed: 0,
             name: "None Name".into(),
             daytime: 0.15,
@@ -135,121 +98,9 @@ impl Default for WorldInfo {
 
             is_paused: false,
             paused_steps: 0,
-
-            terrain_mode: crate::client::settings::TerrainMode::Planet,
-            planet_center: Vec3::new(0.0, 512.0, 0.0),
-            planet_radius: 512.0,
-            planet_shell_thickness: 96.0,
-            gravity_accel: 9.81,
-
-            generator_version: env!("CARGO_PKG_VERSION").to_string(),
-            generator_params_hash: String::new(),
-            world_format_version: 1,
-        };
-
-        wi.recompute_params_hash();
-        wi
-    }
-}
-
-impl WorldInfo {
-    /// Recompute a stable hash of the generator parameters used to produce the base terrain.
-    /// This uses a deterministic serialization of the small set of parameters and blake3.
-    pub fn recompute_params_hash(&mut self) {
-        // Serialize only the generator-related params
-        use serde_json::json;
-        let obj = json!({
-            "terrain_mode": format!("{:?}", self.terrain_mode),
-            "planet_center": [self.planet_center.x, self.planet_center.y, self.planet_center.z],
-            "planet_radius": self.planet_radius,
-            "planet_shell_thickness": self.planet_shell_thickness,
-            "gravity_accel": self.gravity_accel,
-        });
-        if let Ok(s) = serde_json::to_string(&obj) {
-            let hash = blake3::hash(s.as_bytes());
-            self.generator_params_hash = hash.to_hex().to_string();
-        } else {
-            self.generator_params_hash.clear();
+            // is_manipulating: true,
         }
     }
-}
-
-/// Internal synchronous implementation that writes meta.json. Accepts owned `WorldInfo` so it
-/// can be safely moved into a background thread.
-fn save_world_meta_to_disk_sync(w: WorldInfo) {
-    use std::fs;
-    use std::io::Write;
-    use std::path::Path;
-
-    let name = if w.name.trim().is_empty() {
-        format!("world_{:016x}", w.seed)
-    } else {
-        // sanitize: replace spaces with underscore
-        w.name.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-', "_")
-    };
-
-    let save_dir = crate::util::saves_root().join(&name);
-
-    if let Err(err) = fs::create_dir_all(&save_dir) {
-        warn!("Failed to create save dir {:?}: {}", save_dir, err);
-        return;
-    }
-
-    let meta_path = save_dir.join("meta.json");
-
-    // Backup existing meta
-    if meta_path.exists() {
-        let backup_dir = save_dir.join(format!("backup_{}", chrono::Utc::now().format("%Y%m%d%H%M%S")));
-        if let Err(err) = fs::create_dir_all(&backup_dir) {
-            warn!("Failed to create backup dir {:?}: {}", backup_dir, err);
-        } else {
-            if let Err(err) = fs::copy(&meta_path, backup_dir.join("meta.json")) {
-                warn!("Failed to backup meta.json: {}", err);
-            }
-        }
-    }
-
-    let meta = serde_json::json!({
-        "seed": w.seed,
-        "name": w.name,
-        "generator_version": w.generator_version,
-        "generator_params_hash": w.generator_params_hash,
-        "world_format_version": w.world_format_version,
-        "terrain_mode": format!("{:?}", w.terrain_mode),
-        "planet_center": [w.planet_center.x, w.planet_center.y, w.planet_center.z],
-        "planet_radius": w.planet_radius,
-        "planet_shell_thickness": w.planet_shell_thickness,
-        "time_created": w.time_created,
-        "time_modified": w.time_modified,
-    });
-
-    match serde_json::to_string_pretty(&meta) {
-        Ok(text) => {
-            let tmp = save_dir.join("meta.json.tmp");
-            match fs::File::create(&tmp) {
-                Ok(mut f) => {
-                    if let Err(err) = f.write_all(text.as_bytes()) {
-                        warn!("Failed to write meta tmp {:?}: {}", tmp, err);
-                        let _ = fs::remove_file(&tmp);
-                        return;
-                    }
-                    if let Err(err) = fs::rename(&tmp, &meta_path) {
-                        warn!("Failed to rename meta tmp to meta.json: {}", err);
-                    } else {
-                        info!("Saved world meta to {:?}", meta_path);
-                    }
-                }
-                Err(err) => warn!("Failed to create meta tmp {:?}: {}", tmp, err),
-            }
-        }
-        Err(err) => warn!("Failed to serialize world meta: {}", err),
-    }
-}
-
-/// Persist minimal world metadata in a background thread to avoid blocking the caller.
-pub fn save_world_meta_to_disk(w: &WorldInfo) {
-    let owned = w.clone();
-    std::thread::spawn(move || save_world_meta_to_disk_sync(owned));
 }
 
 /// Marker: Despawn the Entity on World Unload.
@@ -262,7 +113,7 @@ struct Sun;
 
 fn on_world_init(
     mut cmds: Commands,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
     // materials: ResMut<Assets<StandardMaterial>>,
     // meshes: ResMut<Assets<Mesh>>,
     // cli: ResMut<ClientInfo>,
@@ -370,7 +221,7 @@ pub struct SkyboxCubemap {
 fn reinterpret_skybox_cubemap(
     asset_server: Res<AssetServer>,
     mut images: ResMut<Assets<Image>>,
-    cubemap: Option<ResMut<SkyboxCubemap>>,
+    mut cubemap: Option<ResMut<SkyboxCubemap>>,
 ) {
     let Some(mut cubemap) = cubemap else {
         return;
@@ -497,114 +348,4 @@ fn tick_world(
         // or from000.looking_at()
         light_trans.rotation = Quat::from_rotation_z(sun_angle) * Quat::from_rotation_y(PI / 2.3);
     }
-}
-
-fn apply_planet_gravity(
-    mut query: Query<(&mut LinearVelocity, &Transform, &RigidBody, Option<&GravityScale>)>,
-    worldinfo: Option<Res<WorldInfo>>,
-    time: Res<Time>,
-) {
-    let Some(w) = worldinfo else { return; };
-    if w.terrain_mode != crate::client::settings::TerrainMode::Planet {
-        return;
-    }
-
-    let dt = time.delta_secs();
-
-    for (mut linvel, transform, rb, grav_scale_opt) in query.iter_mut() {
-        // only affect dynamic bodies
-        if *rb != RigidBody::Dynamic {
-            continue;
-        }
-
-        let gscale = grav_scale_opt.map(|g| g.0).unwrap_or(1.0);
-        let to_center = w.planet_center - transform.translation;
-        let dist2 = to_center.length_squared();
-        if dist2 <= f32::EPSILON {
-            continue;
-        }
-        let dir = to_center / dist2.sqrt();
-
-        linvel.0 += dir * w.gravity_accel * dt * gscale;
-    }
-}
-
-/// Try to load meta.json from disk for this world (by name or by seed) and apply to `w`.
-/// Returns Some(message) describing compatibility status, or None if no meta found.
-pub fn load_world_meta_from_disk(w: &mut WorldInfo) -> Option<String> {
-    use std::fs;
-    use std::path::Path;
-
-    let try_names = vec![
-        w.name.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-', "_"),
-        format!("world_{:016x}", w.seed),
-    ];
-
-    for name in try_names {
-        let meta_path = crate::util::saves_root().join(&name).join("meta.json");
-        if !meta_path.exists() {
-            continue;
-        }
-        match fs::read_to_string(&meta_path) {
-            Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-                Ok(val) => {
-                    // apply known fields if present
-                    if let Some(seed) = val.get("seed").and_then(|v| v.as_u64()) {
-                        w.seed = seed;
-                    }
-                    if let Some(namev) = val.get("name").and_then(|v| v.as_str()) {
-                        w.name = namev.to_string();
-                    }
-                    if let Some(gv) = val.get("generator_version").and_then(|v| v.as_str()) {
-                        // store meta value separately
-                        let meta_gen = gv.to_string();
-                        if meta_gen != w.generator_version {
-                            let msg = format!("Generator version mismatch: meta={} current={}", meta_gen, w.generator_version);
-                            warn!("{}", msg);
-                            // still apply the meta value
-                            w.generator_version = meta_gen;
-                            if let Some(param_hash) = val.get("generator_params_hash").and_then(|v| v.as_str()) {
-                                w.generator_params_hash = param_hash.to_string();
-                            }
-                            if let Some(fmt) = val.get("world_format_version").and_then(|v| v.as_u64()) {
-                                w.world_format_version = fmt as u32;
-                            }
-                            return Some(msg);
-                        } else {
-                            // same version, check params hash
-                            if let Some(param_hash) = val.get("generator_params_hash").and_then(|v| v.as_str()) {
-                                if param_hash != w.generator_params_hash {
-                                    let msg = format!("Generator params hash mismatch: meta={} current={}", param_hash, w.generator_params_hash);
-                                    warn!("{}", msg);
-                                    w.generator_params_hash = param_hash.to_string();
-                                    if let Some(fmt) = val.get("world_format_version").and_then(|v| v.as_u64()) {
-                                        w.world_format_version = fmt as u32;
-                                    }
-                                    return Some(msg);
-                                }
-                            }
-                        }
-                    }
-                    // update timestamps if present
-                    if let Some(tc) = val.get("time_created").and_then(|v| v.as_u64()) {
-                        w.time_created = tc;
-                    }
-                    if let Some(tm) = val.get("time_modified").and_then(|v| v.as_u64()) {
-                        w.time_modified = tm;
-                    }
-                    info!("Loaded world meta from {:?}", meta_path);
-                    return Some("Loaded meta and compatible".to_string());
-                }
-                Err(err) => {
-                    warn!("Failed to parse meta.json {:?}: {}", meta_path, err);
-                    return Some(format!("failed_parse: {}", err));
-                }
-            },
-            Err(err) => {
-                warn!("Failed to read meta.json {:?}: {}", meta_path, err);
-                return Some(format!("failed_read: {}", err));
-            }
-        }
-    }
-    None
 }

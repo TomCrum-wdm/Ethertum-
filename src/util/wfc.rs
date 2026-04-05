@@ -1,7 +1,7 @@
 use bevy::{math::vec3, prelude::*};
 use rand::Rng;
 
-// Note: removed use of unsafe `as_mut` helper; use indexed mutable access instead.
+use crate::util::as_mut;
 
 pub struct SocketId {
     pub shape_id: u16,
@@ -235,59 +235,46 @@ impl WFC {
     }
 
     pub fn run(&mut self) {
-        while let Some(idx) = self.next_tile_to_observe() {
-            // collapse the selected tile by index
-            self.tiles[idx].collapse();
+        while let Some(tile) = self.next_tile_to_observe() {
+            as_mut(tile).collapse();
             info!("Found one to collapse");
 
-            self.propagate(idx);
+            self.propagate(tile);
         }
     }
 
     // find next tile to collapse/observe. used Minimal-Entropy Heuristic here, due to human sence / predictability / stability
-    // return index of next tile to observe (collapse)
-    fn next_tile_to_observe(&self) -> Option<usize> {
-        let mut ret: Option<usize> = None;
+    fn next_tile_to_observe(&self) -> Option<&Tile> {
+        let mut ret = None;
         let mut min = usize::MAX;
-        for (i, tile) in self.tiles.iter().enumerate() {
+        for tile in self.tiles.iter() {
             let n = tile.entropy();
             if n > 1 && n < min {
                 min = n;
-                ret = Some(i);
+                ret = Some(tile);
             }
         }
         ret
     }
 
-    fn propagate(&mut self, tile_idx: usize) {
-        // DFS using indices
+    fn propagate(&self, tile: &Tile) {
+        // DFS
         let mut stack = Vec::new();
-        stack.push(tile_idx);
+        stack.push(tile);
 
-        while let Some(t_idx) = stack.pop() {
-            // clone the possib list to avoid holding immutable borrow while mutating neighbor
-            let oppo_possib = self.tiles[t_idx].possib.clone();
-
+        while let Some(tile) = stack.pop() {
             for (dir_idx, neib_dir) in Tile::DIR.iter().enumerate() {
-                let neib_pos = self.tiles[t_idx].pos + neib_dir.as_ivec3();
+                let neib_pos = tile.pos + neib_dir.as_ivec3();
 
-                if !idx_3d_pos_inbound(neib_pos, self.extent) {
-                    continue;
-                }
-                let neib_idx = idx_3d(neib_pos, self.extent);
+                if let Some(neib_tile) = self.get_tile(neib_pos) {
+                    if neib_tile.is_collapsed() {
+                        continue;
+                    }
 
-                if self.tiles[neib_idx].is_collapsed() {
-                    continue;
-                }
-
-                // mutate neighbor safely
-                let changed = {
-                    let neib_tile_mut = &mut self.tiles[neib_idx];
-                    neib_tile_mut.constrain(&oppo_possib, dir_idx, &self.all_patterns)
-                };
-
-                if changed {
-                    stack.push(neib_idx);
+                    if as_mut(neib_tile).constrain(&tile.possib, dir_idx, &self.all_patterns) {
+                        // propagate changed value
+                        stack.push(neib_tile); // when possibilities reduced need to propagate further.
+                    }
                 }
             }
         }

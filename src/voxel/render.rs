@@ -1,6 +1,7 @@
 use bevy::{asset::ReflectAsset, pbr::{ExtendedMaterial, MaterialExtension}, render::render_resource::{AsBindGroup}, shader::{ShaderRef}};
 
 use crate::prelude::*;
+use crate::client::prelude::*;
 
 pub fn init(app: &mut App)
 {

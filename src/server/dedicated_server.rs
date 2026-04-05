@@ -69,7 +69,7 @@ fn on_init(mut cfg: ResMut<ServerSettings>, mut server_info: ResMut<ServerInfo>)
     }
 }
 
-fn on_exit(mut exit_events: MessageReader<bevy::app::AppExit>, cfg: Res<ServerSettings>, mut server_info: ResMut<ServerInfo>) {
+fn on_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ServerSettings>, mut server_info: ResMut<ServerInfo>) {
     for _ in exit_events.read() {
         info!("Saving server settings to {SERVER_SETTINGS_FILE}");
         match serde_json::to_string_pretty(&*cfg) {

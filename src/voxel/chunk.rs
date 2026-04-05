@@ -1,9 +1,5 @@
 
-<<<<<<< HEAD
 use std::sync::Weak;
-=======
-use std::sync::Weak;
->>>>>>> feature/world-persistence-8073199
 
 use crate::prelude::*;
 
@@ -17,16 +13,8 @@ pub struct Chunk {
     pub mesh_handle_terrain: Handle<Mesh>,
     pub mesh_handle_foliage: Handle<Mesh>,
     pub mesh_handle_liquid: Handle<Mesh>,
-<<<<<<< HEAD
-
-    // cached neighbor chunks that loaded to the ChunkSystem.
-    // for Quick Access without global find neighbor chunk by chunkpos
     pub neighbor_chunks: [Option<Weak<Chunk>>; Self::NEIGHBOR_DIR.len()],
     pub chunkptr_weak: Weak<Chunk>,
-=======
-    pub neighbor_chunks: [Option<Weak<Chunk>>; Self::NEIGHBOR_DIR.len()],
-    pub chunkptr_weak: Weak<Chunk>,
->>>>>>> feature/world-persistence-8073199
 }
 
 impl Chunk {
@@ -58,8 +46,8 @@ impl Chunk {
         &self.voxels[Chunk::local_idx(localpos)]
     }
 
-    pub fn at_voxel_mut(&mut self, localpos: IVec3) -> &mut Vox {
-        &mut self.voxels[Chunk::local_idx(localpos)]
+    pub fn at_voxel_mut(&self, localpos: IVec3) -> &mut Vox {
+        self.at_voxel(localpos).as_mut()
     }
 
     pub fn get_voxel_rel(&self, relpos: IVec3) -> Option<Vox> {
@@ -67,25 +55,20 @@ impl Chunk {
             Some(*self.at_voxel(relpos))
         } else {
             let neib_chunkptr = self.get_chunk_rel(relpos)?;
-            // Avoid blocking cross-chunk lock waits: if neighbor is busy, skip this sample.
-            // Callers that use `*_or_default` will gracefully fall back.
-            let guard = neib_chunkptr.try_lock().ok()?;
-            Some(*guard.at_voxel(Chunk::as_localpos(relpos)))
+            Some(*neib_chunkptr.at_voxel(Chunk::as_localpos(relpos)))
         }
     }
 
-    pub fn set_voxel_rel(&mut self, relpos: IVec3, mut visitor: impl FnMut(&mut Vox)) -> Option<Vox> {
+    pub fn set_voxel_rel(&self, relpos: IVec3, mut visitor: impl FnMut(&mut Vox)) -> Option<Vox> {
+        let vox;
+        let neib_chunkptr;
         if Chunk::is_localpos(relpos) {
-            let vox = self.at_voxel_mut(relpos);
-            visitor(vox);
-            return Some(*vox);
+            vox = self.at_voxel(relpos);
+        } else {
+            neib_chunkptr = self.get_chunk_rel(relpos)?;
+            vox = neib_chunkptr.at_voxel(Chunk::as_localpos(relpos));
         }
-
-        let neib_chunkptr = self.get_chunk_rel(relpos)?;
-        // Avoid potential deadlocks from lock-order inversion across adjacent chunks.
-        let mut neib_chunk = neib_chunkptr.try_lock().ok()?;
-        let vox = neib_chunk.at_voxel_mut(Chunk::as_localpos(relpos));
-        visitor(vox);
+        visitor(vox.as_mut());
         Some(*vox)
     }
     pub fn get_voxel_rel_or_default(&self, relpos: IVec3) -> Vox {
@@ -218,7 +201,7 @@ impl Chunk {
     ];
 
     pub fn is_neighbors_all_loaded(&self) -> bool {
-        self.neighbor_chunks.iter().all(Option::is_some)
+        !self.neighbor_chunks.iter().any(|e| e.is_none())
     }
 
     fn neighbor_idx(relpos: IVec3) -> Option<usize> {

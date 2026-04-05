@@ -8,6 +8,7 @@ use leafwing_input_manager::plugin::InputManagerPlugin;
 
 use crate::client::prelude::*;
 use crate::client::ui::*;
+use crate::prelude::*;
 
 #[derive(Resource, Debug, Clone)]
 pub struct TouchStickState {
@@ -49,9 +50,7 @@ impl Default for TouchStickState {
 }
 
 pub fn init(app: &mut App) {
-    // Defer initial input-map entity spawn slightly on Android so first frame
-    // presentation is not blocked by startup work aggregation.
-    app.add_systems(Update, super::input::input_setup_deferred);
+    app.add_systems(Startup, super::input::input_setup);
     app.add_systems(Update, super::input::input_handle);
     app.add_plugins(InputManagerPlugin::<InputAction>::default());
     app.insert_resource(TouchStickState::default());
@@ -232,34 +231,16 @@ pub fn input_setup(mut cmds: Commands) {
     cmds.spawn(InputAction::default_input_map());
 }
 
-fn input_setup_deferred(
-    mut initialized: Local<bool>,
-    mut defer_frames: Local<u8>,
-    cmds: Commands,
-) {
-    if *initialized {
-        return;
-    }
-
-    if cfg!(target_os = "android") && *defer_frames < 2 {
-        *defer_frames += 1;
-        return;
-    }
-
-    input_setup(cmds);
-    *initialized = true;
-}
-
 pub fn input_handle(
     key: Res<ButtonInput<KeyCode>>,
     query_input: Query<&ActionState<InputAction>>,
 
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut mouse_wheel_events: EventReader<bevy::input::mouse::MouseWheel>,
     mut query_window: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut query_cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut query_controller: Query<&mut CharacterController>,
 
-    _worldinfo: Option<ResMut<WorldInfo>>,
+    worldinfo: Option<ResMut<WorldInfo>>,
     player: Option<ResMut<ClientPlayerInfo>>,
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,

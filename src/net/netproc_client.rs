@@ -1,6 +1,6 @@
 //! Client Networking Handler
 
-use bevy::{ecs::system::EntityCommands, prelude::*};
+use bevy::{ecs::system::EntityCommands, prelude::*, platform::collections::HashMap};
 use bevy_renet::{
     renet::{DefaultChannel, DisconnectReason, RenetClient},
     netcode::NetcodeClientPlugin,
@@ -34,7 +34,7 @@ impl Plugin for ClientNetworkPlugin {
 
 pub fn client_sys(
     // mut client_events: EventReader<ClientEvent>,
-    net_client: Option<ResMut<RenetClient>>,
+    mut net_client: Option<ResMut<RenetClient>>,
     mut last_connected: Local<u32>, // 0=NonConnection, 1=Connecting, 2=Connected
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,
@@ -125,7 +125,6 @@ pub fn client_sys(
                     &asset_server,
                     &mut meshes,
                     &mut materials,
-                    Some(&*worldinfo),
                 );
 
                 // cmds.insert_resource(WorldInfo::default());  // moved to Click Connect. 要在用之前初始化，如果现在标记 那么就来不及初始化 随后就有ChunkNew数据包 要用到资源
@@ -147,7 +146,6 @@ pub fn client_sys(
                     &asset_server,
                     &mut meshes,
                     &mut materials,
-                    Some(&*worldinfo),
                 );
             }
             SPacket::EntityPos { entity_id, position } => {
@@ -224,9 +222,8 @@ pub fn client_sys(
                 }
 
                 // todo: NonLock
-                if let Some(chunkptr) = chunk_sys.get_chunk(*chunkpos) {
-                    let mut chunk = crate::util::lock_arc(chunkptr);
-                    CellData::to_chunk(voxel, &mut *chunk);
+                if let Some(chunk) = chunk_sys.get_chunk(*chunkpos) {
+                    CellData::to_chunk(voxel, chunk.as_mut());
                 } else {
                     warn!("ChunkModify received for missing chunk {}", chunkpos);
                 }
@@ -243,7 +240,6 @@ pub fn spawn_player(
     _asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    worldinfo: Option<&WorldInfo>,
 ) {
     // cmds.add(|world: &mut World| {
     //     let meshes = world.get_resource_mut::<Assets<Mesh>>().unwrap();
@@ -251,23 +247,13 @@ pub fn spawn_player(
     // });
     // let mut ec = cmds.get_or_spawn(entity);
 
-    let mut spawn_transform = Transform::from_xyz(0.0, 0.0, 0.0);
-    if let Some(w) = worldinfo {
-        if w.terrain_mode == crate::client::settings::TerrainMode::Planet {
-            spawn_transform.translation = w.planet_center + Vec3::Y * (w.planet_radius + 1.5);
-        } else {
-            // Flat world: spawn at a reasonable default height above ground
-            spawn_transform.translation = Vec3::new(0.0, 64.0, 0.0);
-        }
-    }
-
     ec.insert(((
             Mesh3d(meshes.add(Capsule3d {
                 radius: 0.3,
                 half_length: 0.9,
             })),
             MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-            spawn_transform,
+            Transform::from_xyz(0.0, 0.0, 0.0),
         ),
         DespawnOnWorldUnload,
     ))

@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use crate::{
     client::prelude::*,
     ui::{color32_of, CurrentUI, UiExtra},
-    util::AsMutRef,
+    util::{as_mut, AsMutRef},
     voxel::{self, lighting::VoxLightQueue, worldgen, Chunk, ChunkSystem, ClientChunkSystem, HitResult, Vox, VoxLight, VoxShape},
 };
 
@@ -28,7 +28,7 @@ pub fn ui_menu_panel(
     net_client: Option<Res<RenetClient>>,
     net_transport: Option<Res<NetcodeClientTransport>>,
 
-    mut app_exit_events: MessageWriter<AppExit>,
+    mut app_exit_events: EventWriter<AppExit>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
@@ -67,7 +67,7 @@ pub fn ui_menu_panel(
                     // ui.label("127.0.0.1:4000 · 21ms");
 
                     // Network Info
-                    if let Some(_net_transport) = net_transport {
+                    if let Some(net_transport) = net_transport {
                         let cli = cl.data();
 
                         let Some(net_client) = net_client else {
@@ -217,17 +217,16 @@ pub fn ui_menu_panel(
                                     }
                                 }
                                 if ui.button("Gen Tree").clicked() {
-                                    if let Some(chunkptr) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
-                                        let mut chunk = crate::util::lock_arc(&chunkptr);
-                                        worldgen::gen_tree(&mut *chunk, Chunk::as_localpos(campos), 0.8);
+                                    if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
+                                        worldgen::gen_tree(chunk.as_mut(), Chunk::as_localpos(campos), 0.8);
                                     }
                                 }
                                 if ui.button("Gen Floor").clicked() {
 
                                     // crate::util::iter::iter_center_spread(10, 1, |p| {
                                     // });
-                                    if let Some(chunkptr) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
-                                        let mut chunk = crate::util::lock_arc(&chunkptr);
+                                    if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
+                                        let chunk = chunk.as_mut();
                                         for x in 0..16 {
                                             for z in 0..16 {
                                                 *chunk.at_voxel_mut(IVec3::new(x, 0, z)) = Vox::new(1, VoxShape::Cube, 0.);
@@ -368,13 +367,12 @@ RAM: {mem_usage_phys:.2} MB, vir {mem_usage_virtual:.2} MB | {mem_used:.2} / {me
 
         let mut cam_cell_str = "none".into();
         let campos_v = cam_pos.floor().as_ivec3();
-        if let Some(chunkptr) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos_v)) {
-            let guard = crate::util::lock_arc(&chunkptr);
-            let vox = guard.at_voxel(Chunk::as_localpos(campos_v));
-
+        if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos_v)) {
+            let vox = chunk.at_voxel(Chunk::as_localpos(campos_v));
+            
             cam_cell_str = format!(
-    "Vox: tex: {}, shape: {:?}, isoval: {}, light: [{}]
-    Chunk: is_populated: {}", vox.tex_id, vox.shape_id, vox.isovalue(), vox.light, guard.is_populated);
+"Vox: tex: {}, shape: {:?}, isoval: {}, light: [{}]
+Chunk: is_populated: {}", vox.tex_id, vox.shape_id, vox.isovalue(), vox.light, chunk.is_populated);
         }
 
         str_world = format!(

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::{client::client_world::ClientPlayerInfo, prelude::*, voxel::VoxelBrush};
+use crate::{client::client_world::ClientPlayerInfo, prelude::*, voxel::{ChunkSystem, ClientChunkSystem, VoxShape, VoxelBrush}};
 
 use bevy_egui::{
     egui::{text::CCursorRange, Align, Frame, Id, Layout, TextEdit},
@@ -19,6 +19,7 @@ use crate::{
     net::{CPacket, RenetClientHelper},
 };
 
+use super::{new_egui_window, settings::ui_setting_line};
 
 // todo: Res是什么原理？每次sys调用会deep拷贝吗？还是传递指针？如果deep clone这么多消息记录 估计会很浪费性能。
 
@@ -208,7 +209,7 @@ pub fn hud_chat(
 pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: ResMut<ClientPlayerInfo>,
     items: Option<Res<crate::item::Items>>,
     mut inv_ui_state: ResMut<super::items::InventoryUiState>,
-    _voxbrush: ResMut<VoxelBrush>,
+    mut voxbrush: ResMut<VoxelBrush>,
     // chunk_sys: Res<ClientChunkSystem>,
 ) {
     let Some(items) = items else {
@@ -235,13 +236,6 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
     //         }
     //     });
 
-    // 新增：物品栏展开与操作模式锁定状态
-    use std::cell::RefCell;
-    thread_local! {
-        static SHOW_ALL_ITEMS: RefCell<bool> = RefCell::new(false);
-        static LOCKED_MODE: RefCell<u8> = RefCell::new(0); // 0=自由，1=攻击，2=放置，3=使用
-    }
-
     egui::Window::new("HUD Hotbar")
         .title_bar(false)
         .resizable(false)
@@ -255,67 +249,30 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
                 rect.set_height(health_bar_size.y);
                 rect.set_width(health_bar_size.x);
                 let rounding = ui.style().visuals.widgets.inactive.rounding();
+
+                // bar bg
                 ui.painter().rect_filled(rect, rounding, Color32::from_black_alpha(200));
+
+                // bar fg
                 let health_max = player.health_max.max(1);
                 let hp_ratio = (player.health as f32 / health_max as f32).clamp(0.0, 1.0);
                 let rect_fg = rect.with_max_x(rect.min.x + health_bar_size.x * hp_ratio);
                 ui.painter().rect_filled(rect_fg, rounding, Color32::WHITE);
+
+                // ui.painter().text(rect.left_center(), Align2::LEFT_CENTER,
+                //     format!(" {} / {}", cli.health, cli.health_max), FontId::proportional(10.), Color32::BLACK, );
+
                 ui.add_space(health_bar_size.y + 8.);
             }
 
             ui.horizontal(|ui| {
-                // 物品栏
                 for i in 0..ClientPlayerInfo::HOTBAR_SLOTS {
                     if let Some(item) = player.inventory.items.get_mut(i as usize) {
                         ui_item_stack(ui, item, i as usize, &items, &mut inv_ui_state);
                     }
                 }
-
-                // 并列按钮区
-                ui.vertical(|ui| {
-                    // 展开按钮
-                    let show_all = SHOW_ALL_ITEMS.with(|v| *v.borrow());
-                    let btn_txt = if show_all { "收起" } else { "展开" };
-                    if ui.button(btn_txt).clicked() {
-                        SHOW_ALL_ITEMS.with(|v| *v.borrow_mut() = !show_all);
-                    }
-                    // 操作模式锁定按钮
-                    let mut locked_mode = LOCKED_MODE.with(|v| *v.borrow());
-                    let mode_txt = match locked_mode {
-                        1 => "锁定:攻击", 2 => "锁定:放置", 3 => "锁定:使用", _ => "自由模式"
-                    };
-                    if ui.button(mode_txt).clicked() {
-                        locked_mode = (locked_mode + 1) % 4;
-                        LOCKED_MODE.with(|v| *v.borrow_mut() = locked_mode);
-                    }
-                });
             });
-
-            // 展开全部物品弹窗（在 outer show 返回后绘制，避免 ctx 的二次可变借用）
         });
-
-    // After outer window drawing, show the full-items popup if requested
-    let show_all_now = SHOW_ALL_ITEMS.with(|v| *v.borrow());
-    if show_all_now {
-        if let Ok(ctx_mut2) = ctx.ctx_mut() {
-            egui::Window::new("全部物品")
-                .anchor(Align2::CENTER_BOTTOM, [0., -cfg.hud_padding - 120.])
-                .resizable(true)
-                .collapsible(false)
-                .show(ctx_mut2, |ui| {
-                    egui::ScrollArea::vertical().max_height(300.).show(ui, |ui| {
-                        for (idx, item) in player.inventory.items.iter_mut().enumerate() {
-                            ui.horizontal(|ui| {
-                                ui_item_stack(ui, item, idx, &items, &mut inv_ui_state);
-                                if let Some(name) = items.reg.at((item.item_id - 1) as u16) {
-                                    ui.label(name);
-                                }
-                            });
-                        }
-                    });
-                });
-        }
-    }
 }
 
 pub fn hud_playerlist(
@@ -449,7 +406,6 @@ pub fn hud_touch_sticks(
     buttons.sprint_pressed = false;
     buttons.crouch_pressed = false;
 
-
     let painter = ctx_mut.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("touch_controls_overlay")));
 
     if let (Some(knob_tex), Some(outline_tex)) = (texture_ids.0, texture_ids.1) {
@@ -528,17 +484,7 @@ pub fn hud_touch_sticks(
                 );
                 let p = rect.center();
 
-                let prev_pressed = match binding {
-                    TouchActionBinding::Attack => prev.attack_pressed,
-                    TouchActionBinding::UseItem => prev.use_pressed,
-                    TouchActionBinding::Jump => prev.jump_pressed,
-                    TouchActionBinding::Sprint => prev.sprint_pressed,
-                    TouchActionBinding::Sneak => prev.crouch_pressed,
-                };
-
-                let pointer_down = ui.input(|i| i.pointer.primary_down());
-
-                let pressed = (resp.hovered() && pointer_down && !cli.touch_controls_edit_mode) || (prev_pressed && pointer_down);
+                let pressed = resp.hovered() && ui.input(|i| i.pointer.primary_down()) && !cli.touch_controls_edit_mode;
 
                 if cli.touch_controls_edit_mode && resp.dragged() {
                     if let Some(pointer_pos) = resp.interact_pointer_pos() {

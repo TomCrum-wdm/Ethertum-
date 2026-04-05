@@ -11,89 +11,12 @@ pub mod vtx {
 pub mod registry;
 
 // Unsafe as_mut()
-// Clippy warns about `mut_from_ref`; this function intentionally performs an
-// unsafe cast. Keep lint allowed but document usage to avoid silent UB.
-//
-// NOTE: This function is UNSAFE by design and can cause undefined behaviour
-// if the caller violates Rust's aliasing/mutability invariants. Prefer using
-// the safe `lock_arc` helper for shared, concurrent data (see below).
+
 #[allow(invalid_reference_casting)]
-#[allow(clippy::mut_from_ref)]
-#[deprecated(note = "unsafe helper; prefer using Arc<Mutex<T>> + lock_arc or safe ownership refactors")]
-pub(crate) fn as_mut<T>(v: &T) -> &mut T {
+pub fn as_mut<T>(v: &T) -> &mut T {
     unsafe { &mut *((v as *const T) as *mut T) }
 }
 
-// Thread-safe locking helper for Arc<Mutex<T>> resources.
-// Use this where the shared value is stored in an `Arc<Mutex<T>>` and
-// you need mutable access without invoking undefined behaviour.
-// Example: `let mut g = lock_arc(&arc_mutex);` then use `*g`.
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::ops::{Deref, DerefMut};
-use std::cell::RefCell;
-
-thread_local! {
-    // keep a small stack of acquired lock addresses per thread for simple ordering checks
-    static LOCK_STACK: RefCell<Vec<usize>> = RefCell::new(Vec::new());
-}
-
-pub struct TrackedMutexGuard<'a, T> {
-    inner: MutexGuard<'a, T>,
-    addr: usize,
-}
-
-impl<'a, T> Deref for TrackedMutexGuard<'a, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &*self.inner
-    }
-}
-
-impl<'a, T> DerefMut for TrackedMutexGuard<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.inner
-    }
-}
-
-impl<'a, T> Drop for TrackedMutexGuard<'a, T> {
-    fn drop(&mut self) {
-        // pop from thread-local stack
-        LOCK_STACK.with(|s| {
-            let mut v = s.borrow_mut();
-            if let Some(last) = v.pop() {
-                if last != self.addr {
-                    // best-effort cleanup on mismatch
-                    debug!("lock order stack mismatch: expected {:x}, got {:x}", last, self.addr);
-                }
-            }
-        });
-    }
-}
-
-/// Thread-safe locking helper for Arc<Mutex<T>> resources.
-/// Returns a tracked guard which logs potential lock-order inversions in debug builds.
-pub fn lock_arc<T>(a: &Arc<Mutex<T>>) -> TrackedMutexGuard<'_, T> {
-    let addr = Arc::as_ptr(a) as usize;
-    // simple check: if previous locked addr is greater than current, warn about potential inversion
-    LOCK_STACK.with(|s| {
-        let v = s.borrow();
-        if let Some(&prev) = v.last() {
-            if prev > addr {
-                warn!("possible lock-order inversion: prev=0x{:x} current=0x{:x}", prev, addr);
-            }
-        }
-    });
-
-    let guard = a.lock().expect("lock_arc: failed to acquire mutex");
-
-    LOCK_STACK.with(|s| {
-        s.borrow_mut().push(addr);
-    });
-
-    TrackedMutexGuard { inner: guard, addr }
-}
-
-#[allow(clippy::mut_from_ref)]
 pub trait AsMutRef<T> {
     fn as_mut(&self) -> &mut T;
 }
@@ -175,41 +98,9 @@ pub fn hashcode<T: Hash>(t: &T) -> u64 {
     s.finish()
 }
 
-use std::path::PathBuf;
-
-/// Returns the root directory used for saves, adapted per-platform.
-pub fn saves_root() -> PathBuf {
-    #[cfg(target_os = "android")]
-    {
-        // On Android prefer $HOME (app-specific data dir) if present.
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join("saves");
-        }
-
-        // Fallback to common app-private locations. Try both variants used on different Android setups.
-        // Prefer `/data/data/<pkg>/files/saves` then `/data/user/0/<pkg>/files/saves`.
-        // Package id default is `com.ethertia.client`; allow override via env `ETHERTIA_ANDROID_PACKAGE`.
-        let pkg = std::env::var("ETHERTIA_ANDROID_PACKAGE").unwrap_or_else(|_| "com.ethertia.client".to_string());
-        let candidate1 = PathBuf::from(format!("/data/data/{}/files/saves", pkg));
-        if candidate1.exists() {
-            return candidate1;
-        }
-        let candidate2 = PathBuf::from(format!("/data/user/0/{}/files/saves", pkg));
-        if candidate2.exists() {
-            return candidate2;
-        }
-
-        // As a last resort, fall back to current dir to keep behavior predictable on emulators.
-        return std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("saves");
-    }
-
-    // Default: relative 'saves' folder in working directory.
-    PathBuf::from("saves")
-}
-
 // Iter
 
-// use std::sync::Arc;  // Arc already imported above where needed
+use std::sync::Arc;
 
 pub mod iter {
     use bevy::math::{ivec3, IVec3};

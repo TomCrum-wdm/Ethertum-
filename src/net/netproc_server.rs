@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::{prelude::*, platform::collections::HashSet};
 use bevy_renet::{
     renet::{ConnectionConfig, DefaultChannel, RenetServer, ServerEvent},
@@ -6,9 +8,10 @@ use bevy_renet::{
 };
 
 use crate::{
-    net::{packet::{InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
+    net::{packet::{CellData, InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
     server::prelude::*,
-    util::current_timestamp_millis,
+    util::{current_timestamp_millis, AsMutRef},
+    voxel::{ChunkSystem, ServerChunkSystem},
 };
 
 fn starter_inventory() -> Vec<NetItemStack> {
@@ -44,32 +47,11 @@ impl Plugin for ServerNetworkPlugin {
             ..default()
         }));
 
-        // Defer endpoint bind on Android to avoid concentrating startup work before
-        // first frame. This keeps behavior identical while shifting timing.
-        app.add_systems(Update, bind_server_endpoint_deferred);
+        app.add_systems(Startup, bind_server_endpoint);
         app.add_systems(Update, server_sys);
 
         // app.add_systems(Update, ui_server_net);
     }
-}
-
-fn bind_server_endpoint_deferred(
-    mut initialized: Local<bool>,
-    mut defer_frames: Local<u8>,
-    cmds: Commands,
-    cfg: Res<ServerSettings>,
-) {
-    if *initialized {
-        return;
-    }
-
-    if cfg!(target_os = "android") && *defer_frames < 2 {
-        *defer_frames += 1;
-        return;
-    }
-
-    bind_server_endpoint(cmds, cfg);
-    *initialized = true;
 }
 
 fn bind_server_endpoint(mut cmds: Commands, cfg: Res<ServerSettings>) {
@@ -87,7 +69,7 @@ fn bind_server_endpoint(mut cmds: Commands, cfg: Res<ServerSettings>) {
 }
 
 pub fn server_sys(
-    mut server_events: MessageReader<ServerEvent>,
+    mut server_events: EventReader<ServerEvent>,
     mut server: ResMut<RenetServer>,
     transport: Option<Res<NetcodeServerTransport>>,
 
@@ -171,11 +153,10 @@ pub fn server_sys(
                         server.send_packet_disconnect(client_id, format!("Player {} already logged in", &username));
                         continue;
                     }
-                    // Keep login handling non-blocking on the main thread.
-                    // Previous simulated delay used thread::sleep here and could stall frame updates.
+                    // 模拟登录验证
+                    std::thread::sleep(Duration::from_millis(800));
 
-                    // Spawn player entity at a safe default height above ground
-                    let entity_id = EntityId::from_server(cmds.spawn(Transform::from_translation(Vec3::new(0.0, 64.0, 0.0))).id());
+                    let entity_id = EntityId::from_server(cmds.spawn(Transform::default()).id());
 
                     // Login Success
                     server.send_packet(client_id, &SPacket::LoginSuccess { player_entity: entity_id });
@@ -222,7 +203,7 @@ pub fn server_sys(
                             user_id: uuid,
                             client_id,
                             entity_id,
-                            position: Vec3::new(0.0, 64.0, 0.0),
+                            position: Vec3::ZERO,
                             chunks_loaded: HashSet::default(),
                             chunks_load_distance: IVec2::new(-1, -1), // 4 2
                             ping_rtt: 0,

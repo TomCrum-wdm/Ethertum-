@@ -1,13 +1,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::ToSocketAddrs;
 
-use bevy::{ecs::system::SystemParam, math::vec3, prelude::*};
+use bevy::{ecs::system::SystemParam, math::vec3, light::DirectionalLightShadowMap, prelude::*};
 use bevy_renet::renet::RenetClient;
 use avian3d::prelude::*;
 
-// `bevy_atmosphere` is an optional dependency; import it only when the
-// optional feature is enabled.
-#[cfg(feature = "bevy_atmosphere")]
+#[cfg(feature = "target_native_os")]
 use bevy_atmosphere::prelude::*;
 
 use crate::client::prelude::*;
@@ -65,19 +63,9 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
-        #[cfg(target_os = "android")]
-        let enable_integrated_server = matches!(
-            std::env::var("ETHERTIA_ANDROID_INTEGRATED_SERVER"),
-            Ok(v) if v == "1" || v.eq_ignore_ascii_case("true")
-        );
-        #[cfg(not(target_os = "android"))]
-        let enable_integrated_server = true;
-
-        if enable_integrated_server {
-            app.add_plugins(IntegratedServerPlugin);
-        } else {
-            info!("IntegratedServerPlugin disabled on Android by default");
-        }
+        // Integrated local server is unavailable on wasm runtime.
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(IntegratedServerPlugin);
         
         // ClientInfo
         app.insert_resource(ClientInfo::default());
@@ -306,12 +294,12 @@ pub struct EthertiaClient<'w, 's> {
     pub cfg: ResMut<'w, ClientSettings>,
 
     cmds: Commands<'w, 's>,
-    worldinfo: Option<ResMut<'w, WorldInfo>>,
 }
 
 impl<'w, 's> EthertiaClient<'w, 's> {
     /// for Singleplayer
     // pub fn load_world(&mut self, cmds: &mut Commands, server_addr: String)
+
     pub fn data(&mut self) -> &mut ClientInfo {
         self.clientinfo.as_mut()
     }
@@ -420,58 +408,12 @@ impl<'w, 's> EthertiaClient<'w, 's> {
     }
 
     pub fn enter_world(&mut self) {
-        let mut wi = WorldInfo::default();
-        wi.terrain_mode = self.cfg.terrain_mode;
-        wi.planet_center = Vec3::new(self.cfg.planet_center[0], self.cfg.planet_center[1], self.cfg.planet_center[2]);
-        wi.planet_radius = self.cfg.planet_radius;
-        wi.planet_shell_thickness = self.cfg.planet_shell_thickness;
-        wi.gravity_accel = self.cfg.gravity_accel;
-        wi.recompute_params_hash();
-        // attempt to load existing meta and detect compatibility
-        if let Some(msg) = crate::client::client_world::load_world_meta_from_disk(&mut wi) {
-            info!("World meta load status: {}", msg);
-        }
-        self.cmds.insert_resource(wi);
-        self.data().curr_ui = CurrentUI::None;
-    }
-
-    /// Enter a singleplayer world by specifying an existing save `name` (folder under `saves/`)
-    /// or a `seed` for a new unnamed world. Both parameters are optional; if provided they
-    /// will be applied to the created `WorldInfo` before attempting to load per-world meta.
-    pub fn enter_world_with_save(&mut self, name: Option<String>, seed: Option<u64>) {
-        let mut wi = WorldInfo::default();
-        wi.terrain_mode = self.cfg.terrain_mode;
-        wi.planet_center = Vec3::new(self.cfg.planet_center[0], self.cfg.planet_center[1], self.cfg.planet_center[2]);
-        wi.planet_radius = self.cfg.planet_radius;
-        wi.planet_shell_thickness = self.cfg.planet_shell_thickness;
-        wi.gravity_accel = self.cfg.gravity_accel;
-
-        if let Some(s) = seed {
-            wi.seed = s;
-        }
-        if let Some(n) = name {
-            wi.name = n;
-        }
-
-        wi.recompute_params_hash();
-
-        // attempt to load existing meta and detect compatibility
-        if let Some(msg) = crate::client::client_world::load_world_meta_from_disk(&mut wi) {
-            info!("World meta load status: {}", msg);
-        }
-        self.cmds.insert_resource(wi);
+        self.cmds.insert_resource(WorldInfo::default());
         self.data().curr_ui = CurrentUI::None;
     }
 
     pub fn exit_world(&mut self) {
-<<<<<<< HEAD
-        // attempt to persist world meta before removing resource
-        if let Some(mut w) = self.worldinfo.as_mut() {
-            crate::client::client_world::save_world_meta_to_disk(&*w);
-        }
-=======
         self.request_save_world();
->>>>>>> feature/world-persistence-8073199
         self.cmds.remove_resource::<WorldInfo>();
         self.data().curr_ui = CurrentUI::MainMenu;
     }
