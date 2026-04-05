@@ -9,3 +9,8 @@
 
 .DS_Storedevice_log.txt
 device_log.txt
+
+# Local scratch artifacts
+/__tmp_*
+/ethertia-main.bundle
+*known_hosts
