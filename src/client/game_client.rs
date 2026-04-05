@@ -346,17 +346,6 @@ impl<'w, 's> EthertiaClient<'w, 's> {
                 }
             };
 
-<<<<<<< HEAD
-        // 提前初始化世界 以防用资源时 发现没有被初始化
-        let mut wi = WorldInfo::default();
-        wi.terrain_mode = self.cfg.terrain_mode;
-        wi.planet_center = Vec3::new(self.cfg.planet_center[0], self.cfg.planet_center[1], self.cfg.planet_center[2]);
-        wi.planet_radius = self.cfg.planet_radius;
-        wi.planet_shell_thickness = self.cfg.planet_shell_thickness;
-        wi.gravity_accel = self.cfg.gravity_accel;
-        wi.recompute_params_hash();
-        self.cmds.insert_resource(wi);
-=======
             self.data().curr_ui = CurrentUI::ConnectingServer;
             self.clientinfo.server_addr.clone_from(&server_addr);
 
@@ -428,7 +417,6 @@ impl<'w, 's> EthertiaClient<'w, 's> {
 
     pub fn request_save_world(&mut self) {
         self.cmds.insert_resource(WorldSaveRequest { save_now: true });
->>>>>>> feature/world-persistence-8073199
     }
 
     pub fn enter_world(&mut self) {
