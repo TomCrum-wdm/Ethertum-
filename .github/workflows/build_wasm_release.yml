@@ -18,6 +18,7 @@ jobs:
     
     env:
       APP_NAME: ethertia
+      CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: --cfg getrandom_backend="wasm_js"
       
     steps:
       - name: Checkout Repository
@@ -41,6 +42,7 @@ jobs:
           rustup target add wasm32-unknown-unknown --toolchain nightly-2025-10-16
           rustup target list --installed --toolchain nightly-2025-10-16 | grep wasm32-unknown-unknown
           rustc +nightly-2025-10-16 -Vv
+          echo "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS=${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS}"
 
       - name: Install Dependencies
         run: |
