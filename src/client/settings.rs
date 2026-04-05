@@ -1,4 +1,4 @@
-use bevy::reflect::Reflect;
+use bevy::reflect::{Reflect, TypePath, FromReflect};
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
 pub enum TerrainMode {
     Planet,
@@ -9,12 +9,6 @@ pub enum TerrainMode {
 
 use crate::prelude::*;
 use std::path::PathBuf;
-use bevy::tasks::{AsyncComputeTaskPool, Task};
-use futures_lite::future::poll_once;
-use bevy::prelude::Commands;
-
-#[derive(Resource)]
-struct ClientSettingsLoadTask(Task<Option<ClientSettings>>);
 
 pub const CLIENT_SETTINGS_FILE: &str = "client.settings.json";
 
@@ -43,42 +37,22 @@ fn client_settings_path() -> PathBuf {
     PathBuf::from(CLIENT_SETTINGS_FILE)
 }
 
-fn on_app_init(mut commands: Commands) {
+fn on_app_init(mut cfg: ResMut<ClientSettings>) {
     let cfg_path = client_settings_path();
-    info!("Scheduling async load of {}", cfg_path.display());
-
-    // Start background task to read config file without blocking startup/splash.
-    let pool = AsyncComputeTaskPool::get();
-    let cfg_path_clone = cfg_path.clone();
-    let task = pool.spawn(async move {
-        match std::fs::read_to_string(&cfg_path_clone) {
-            Ok(s) => serde_json::from_str::<ClientSettings>(&s).ok(),
-            Err(_) => None,
-        }
-    });
-
-    commands.insert_resource(ClientSettingsLoadTask(task));
-}
-
-fn poll_settings_load(
-    mut cfg: ResMut<ClientSettings>,
-    maybe_task: Option<ResMut<ClientSettingsLoadTask>>,
-    mut commands: Commands,
-) {
-    if let Some(mut task_res) = maybe_task {
-        // poll_once + block_on here performs exactly one poll and returns immediately,
-        // so it won't stall the main thread while waiting for completion.
-        if let Some(polled) = futures_lite::future::block_on(poll_once(&mut task_res.0)) {
-            if let Some(val) = polled {
+    info!("Loading {}", cfg_path.display());
+    match std::fs::read_to_string(&cfg_path) {
+        Ok(str) => {
+            if let Ok(val) = serde_json::from_str(&str) {
                 *cfg = val;
-                info!("Client settings loaded asynchronously");
             }
-            commands.remove_resource::<ClientSettingsLoadTask>();
+        }
+        Err(err) => {
+            debug!("Skip loading {}: {err}", cfg_path.display());
         }
     }
 }
 
-fn on_app_exit(mut exit_events: MessageReader<bevy::app::AppExit>, cfg: Res<ClientSettings>) {
+fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ClientSettings>) {
     for _ in exit_events.read() {
         info!("Program Terminate");
 
@@ -104,8 +78,7 @@ pub fn build_plugin(app: &mut App) {
     app.insert_resource(ClientSettings::default());
     app.register_type::<ClientSettings>();
 
-    app.add_systems(PreStartup, on_app_init); // schedule async load of settings
-    app.add_systems(Update, poll_settings_load); // apply when ready
+    app.add_systems(PreStartup, on_app_init); // load settings
     app.add_systems(Last, on_app_exit); // save settings
 }
 
@@ -281,13 +254,6 @@ pub struct ClientSettings {
     #[reflect(ignore)]
     pub controls: ControlsConfig,
 
-    // Custom planet parameters (persisted in client settings)
-    #[reflect(ignore)]
-    pub planet_center: [f32; 3],
-    pub planet_radius: f32,
-    pub planet_shell_thickness: f32,
-    pub gravity_accel: f32,
-
     pub terrain_mode: TerrainMode, // 新增：地形模式
 }
 
@@ -304,10 +270,6 @@ impl Default for ClientSettings {
 
             chunks_load_distance: IVec2::new(4, 3),
             controls: ControlsConfig::default(),
-            planet_center: [0.0, 512.0, 0.0],
-            planet_radius: 512.0,
-            planet_shell_thickness: 96.0,
-            gravity_accel: 9.81,
             terrain_mode: TerrainMode::Planet, // 默认球体
         }
     }
