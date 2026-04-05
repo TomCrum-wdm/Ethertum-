@@ -20,19 +20,107 @@
         canvas {
             display: block;
             touch-action: none;
+            width: 100vw;
+            height: 100vh;
         }
 
         canvas:focus {
             outline: none;
         }
+
+        #boot-overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: radial-gradient(circle at 20% 20%, #1f2a44, #0d111a 60%, #05070b);
+            color: #f0f3ff;
+            font-family: "Segoe UI", Tahoma, sans-serif;
+            z-index: 9999;
+            cursor: pointer;
+            user-select: none;
+            text-align: center;
+            padding: 24px;
+        }
+
+        #boot-overlay .title {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+
+        #boot-overlay .hint {
+            max-width: 780px;
+            opacity: 0.85;
+            line-height: 1.45;
+            font-size: 14px;
+        }
     </style>
 </head>
 
 <body>
-    
+
+    <div id="boot-overlay">
+        <div class="title">Click To Start</div>
+        <div class="hint">This captures keyboard focus for gameplay. If browser extensions intercept keys or downloads, disable them for this site.</div>
+    </div>
+
     <script type="module">
         import init from './ethertia.js'
-        init()
+
+        let started = false
+        const overlay = document.getElementById('boot-overlay')
+
+        function focusCanvas() {
+            const canvas = document.querySelector('canvas')
+            if (!canvas) {
+                return
+            }
+            canvas.setAttribute('tabindex', '1')
+            canvas.focus()
+            canvas.addEventListener('click', () => canvas.focus())
+        }
+
+        // Capture at the top to reduce extension hotkey hijack on gameplay keys.
+        window.addEventListener('keydown', (event) => {
+            if (!started) {
+                return
+            }
+
+            const target = event.target
+            const tag = target && target.tagName ? target.tagName.toLowerCase() : ''
+            const editable = target && (target.isContentEditable || tag === 'input' || tag === 'textarea')
+            if (editable) {
+                return
+            }
+
+            const key = event.key ? event.key.toLowerCase() : ''
+            const code = event.code || ''
+            const blocked = key === 'w' || key === 'a' || key === 's' || key === 'd'
+                || code === 'Space'
+                || code === 'ShiftLeft' || code === 'ShiftRight'
+                || code === 'Escape'
+
+            if (blocked) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+        }, true)
+
+        async function startGame() {
+            if (started) {
+                return
+            }
+            started = true
+            overlay?.remove()
+            await init()
+            requestAnimationFrame(focusCanvas)
+        }
+
+        overlay?.addEventListener('click', startGame)
     </script>
 </body>
 

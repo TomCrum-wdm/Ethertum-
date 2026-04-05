@@ -390,9 +390,10 @@ impl<'w, 's> EthertiaClient<'w, 's> {
     pub fn connect_local_world(&mut self, world_name: String, seed: u64, port: u16) {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = (world_name, seed, port);
-            self.data().disconnected_reason = "Local play is unavailable on this runtime".to_string();
-            self.data().curr_ui = CurrentUI::DisconnectedReason;
+            let _ = port;
+            self.select_active_world(world_name, seed);
+            self.data().disconnected_reason.clear();
+            self.data().curr_ui = CurrentUI::None;
             return;
         }
 

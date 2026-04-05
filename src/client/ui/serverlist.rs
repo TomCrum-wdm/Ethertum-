@@ -306,7 +306,7 @@ pub fn ui_localsaves(
     }
 
     new_egui_window("Local Worlds").show(ctx_mut, |ui| {
-        let local_world_supported = serv_cfg.is_some();
+        let local_world_supported = serv_cfg.is_some() || cfg!(target_arch = "wasm32");
         let mut do_refresh = false;
         let mut do_delete: Option<String> = None;
         let mut do_play: Option<(String, u64)> = None;
@@ -406,7 +406,9 @@ pub fn ui_localsaves(
         }
 
         if let Some((name, seed)) = do_play {
-            if let Some(serv_cfg) = &serv_cfg {
+            if cfg!(target_arch = "wasm32") {
+                cli.connect_local_world(name, seed, 0);
+            } else if let Some(serv_cfg) = &serv_cfg {
                 cli.connect_local_world(name, seed, serv_cfg.port);
             } else {
                 *last_error = "Integrated server unavailable on this runtime".to_string();
@@ -435,7 +437,7 @@ pub fn ui_create_world(
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
-    let local_play_supported = serv_cfg.is_some();
+    let local_play_supported = serv_cfg.is_some() || cfg!(target_arch = "wasm32");
 
     new_egui_window("New World").show(ctx_mut, |ui| {
         // ui_lr_panel(ui, true, |ui| {
@@ -541,7 +543,9 @@ pub fn ui_create_world(
             match crate::voxel::create_world(&final_name, seed) {
                 Ok(meta) => {
                     create_error.clear();
-                    if let Some(serv_cfg) = &serv_cfg {
+                    if cfg!(target_arch = "wasm32") {
+                        cli.connect_local_world(meta.name, meta.seed, 0);
+                    } else if let Some(serv_cfg) = &serv_cfg {
                         cli.connect_local_world(meta.name, meta.seed, serv_cfg.port);
                     } else {
                         *create_error = "Integrated server unavailable on this runtime".to_string();

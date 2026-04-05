@@ -223,12 +223,17 @@ fn chunks_detect_load_and_unload(
         return;
     };
     let vp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3()); // viewer pos
+    #[cfg(target_arch = "wasm32")]
+    let vd = IVec2::new(cfg.chunks_load_distance.x.min(2), cfg.chunks_load_distance.y.min(1));
+    #[cfg(not(target_arch = "wasm32"))]
     let vd = cfg.chunks_load_distance;
+
+    let max_loading = if cfg!(target_arch = "wasm32") { 2 } else { 8 };
 
     // Chunks Detect Load/Gen
 
     iter::iter_center_spread(vd.x, vd.y, |rp| {
-        if chunks_loading.len() > 8 {
+        if chunks_loading.len() > max_loading {
             //chunk_sys.max_concurrent_loading {
             return;
         }
