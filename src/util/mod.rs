@@ -214,27 +214,27 @@ pub fn generate_simple_user_name() -> String {
     )
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 pub fn http_get_json<T: DeserializeOwned>(url: &str) -> anyhow::Result<T> {
     let client = reqwest::blocking::Client::builder().build()?;
     Ok(serde_json::from_value(client.get(url).send()?.json()?)?)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
 pub fn http_get_json<T: DeserializeOwned>(_url: &str) -> anyhow::Result<T> {
-    anyhow::bail!("http_get_json is temporarily disabled on Android build")
+    anyhow::bail!("http_get_json is disabled on this target")
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 pub async fn http_get_json_async<T: DeserializeOwned>(url: &str) -> anyhow::Result<T> {
     // let client = reqwest::Client::builder().build()?;
     // Ok(serde_json::from_value(client.get(url).send().await?.json().await?)?)
     Ok(serde_json::from_value(reqwest::get(url).await?.json().await?)?)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
 pub async fn http_get_json_async<T: DeserializeOwned>(_url: &str) -> anyhow::Result<T> {
-    anyhow::bail!("http_get_json_async is temporarily disabled on Android build")
+    anyhow::bail!("http_get_json_async is disabled on this target")
 }
 
 // pub fn get_server_list(url: &str) -> anyhow::Result<Vec<crate::game_client::ServerListItem>> {

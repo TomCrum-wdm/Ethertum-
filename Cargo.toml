@@ -23,7 +23,7 @@ ddgi2 = []
 
 
 [dev-dependencies]
-bevy = { version = "0.17.2", features = ["dynamic_linking", "file_watcher", "bevy_solari", "jpeg"] }
+bevy = { version = "0.17.2", features = ["dynamic_linking", "bevy_solari", "jpeg"] }
 # cargo run --features bevy/trace_tracy
 
 
