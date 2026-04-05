@@ -65,7 +65,6 @@ impl Plugin for ClientGamePlugin {
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
-<<<<<<< HEAD
         #[cfg(target_os = "android")]
         let enable_integrated_server = matches!(
             std::env::var("ETHERTIA_ANDROID_INTEGRATED_SERVER"),
@@ -79,11 +78,6 @@ impl Plugin for ClientGamePlugin {
         } else {
             info!("IntegratedServerPlugin disabled on Android by default");
         }
-=======
-        // Integrated local server is unavailable on wasm runtime.
-        #[cfg(not(target_arch = "wasm32"))]
-        app.add_plugins(IntegratedServerPlugin);
->>>>>>> feature/world-persistence-8073199
         
         // ClientInfo
         app.insert_resource(ClientInfo::default());
