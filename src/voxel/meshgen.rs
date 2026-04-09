@@ -32,6 +32,30 @@ pub fn generate_chunk_mesh(vbuf: &mut VertexBuffer, chunk: &Chunk) {
     }
 }
 
+pub fn generate_chunk_mesh_surface_fast(vbuf: &mut VertexBuffer, chunk: &Chunk) {
+    iter::iter_xzy(Chunk::LEN, |lp| {
+        let vox = chunk.at_voxel(lp);
+        if vox.is_nil() || !vox.is_cube() {
+            return;
+        }
+
+        // Skip fully occluded inner voxels early to reduce per-face work.
+        let mut has_exposed_face = false;
+        for dir in FACE_DIRS {
+            let neib = chunk.get_voxel_rel_or_default(lp + dir);
+            if !is_face_occluded(vox, neib) {
+                has_exposed_face = true;
+                break;
+            }
+        }
+        if !has_exposed_face {
+            return;
+        }
+
+        put_cube(vbuf, lp, chunk, vox);
+    });
+}
+
 pub fn generate_chunk_mesh_foliage(vbuf: &mut VertexBuffer, chunk: &Chunk) {
     iter::iter_xzy(Chunk::LEN, |lp| {
         let c = chunk.at_voxel(lp);
@@ -279,10 +303,7 @@ fn put_cube(vbuf: &mut VertexBuffer, lp: IVec3, chunk: &Chunk, vox: &Vox) {
 
         // skip the face if there's Obaque Cube
         let neib = chunk.get_voxel_rel_or_default(lp + face_dir);
-        if  neib.is_obaque_cube() {
-            continue;
-        }
-        if vox.tex_id == VoxTex::Water && neib.tex_id == VoxTex::Water {
+        if is_face_occluded(vox, neib) {
             continue;  // for Water2Water no face.
         }
 
@@ -296,6 +317,23 @@ fn put_cube(vbuf: &mut VertexBuffer, lp: IVec3, chunk: &Chunk, vox: &Vox) {
             );
         }
     }
+}
+
+const FACE_DIRS: [IVec3; 6] = [
+    IVec3::new(-1, 0, 0),
+    IVec3::new(1, 0, 0),
+    IVec3::new(0, -1, 0),
+    IVec3::new(0, 1, 0),
+    IVec3::new(0, 0, -1),
+    IVec3::new(0, 0, 1),
+];
+
+#[inline]
+fn is_face_occluded(vox: &Vox, neib: Vox) -> bool {
+    if neib.is_obaque_cube() {
+        return true;
+    }
+    vox.tex_id == VoxTex::Water && neib.tex_id == VoxTex::Water
 }
 
 // put a -X face in middle of pos. for foliages.

@@ -1,7 +1,19 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::ToSocketAddrs;
 
-use bevy::{ecs::system::SystemParam, math::vec3, light::DirectionalLightShadowMap, prelude::*};
+use bevy::{
+    anti_alias::fxaa::Fxaa,
+    asset::RenderAssetUsages,
+    camera::RenderTarget,
+    core_pipeline::tonemapping::Tonemapping,
+    ecs::system::SystemParam,
+    light::DirectionalLightShadowMap,
+    math::vec3,
+    post_process::bloom::Bloom,
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
+};
+use bevy::pbr::wireframe::{Wireframe, WireframePlugin};
 use bevy_renet::renet::RenetClient;
 use avian3d::prelude::*;
 
@@ -14,9 +26,84 @@ use crate::net::{CPacket, ClientNetworkPlugin, RenetClientHelper};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::prelude::IntegratedServerPlugin;
 use crate::ui::prelude::*;
-use crate::voxel::{ActiveWorld, ClientVoxelPlugin, WorldSaveRequest};
+use crate::voxel::{ActiveWorld, ClientVoxelPlugin, VoxelChunkRenderMesh, WorldSaveRequest};
 
 pub struct ClientGamePlugin;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorViewMode {
+    View3D,
+    View2D,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorBottomTab {
+    Resources,
+    Diagnostics,
+    Assets,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCameraMode {
+    Fly,
+    Orbit,
+    TopDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRenderMode {
+    Lit,
+    Flat,
+    Performance,
+    Wireframe,
+}
+
+#[derive(Component)]
+pub struct EditorViewportCamera;
+
+#[derive(Resource, Debug)]
+pub struct EditorViewportRttState {
+    pub image_handle: Handle<Image>,
+    pub texture_id: Option<bevy_egui::egui::TextureId>,
+    pub requested_size: UVec2,
+    pub allocated_size: UVec2,
+}
+
+impl Default for EditorViewportRttState {
+    fn default() -> Self {
+        Self {
+            image_handle: Handle::default(),
+            texture_id: None,
+            requested_size: UVec2::new(1280, 720),
+            allocated_size: UVec2::ZERO,
+        }
+    }
+}
+
+#[derive(Resource, Debug)]
+pub struct EditorRuntime {
+    pub view_mode: EditorViewMode,
+    pub camera_mode: EditorCameraMode,
+    pub render_mode: EditorRenderMode,
+    pub show_help: bool,
+    pub selected_entity: Option<Entity>,
+    pub bottom_tab: EditorBottomTab,
+    pub show_lod_overlay: bool,
+}
+
+impl Default for EditorRuntime {
+    fn default() -> Self {
+        Self {
+            view_mode: EditorViewMode::View3D,
+            camera_mode: EditorCameraMode::Fly,
+            render_mode: EditorRenderMode::Lit,
+            show_help: true,
+            selected_entity: None,
+            bottom_tab: EditorBottomTab::Resources,
+            show_lod_overlay: true,
+        }
+    }
+}
 
 impl Plugin for ClientGamePlugin {
     fn build(&self, app: &mut App) {
@@ -48,6 +135,7 @@ impl Plugin for ClientGamePlugin {
         }
         // .obj model loader.
         app.add_plugins(bevy_obj::ObjPlugin);
+        app.add_plugins(WireframePlugin::default());
         app.insert_resource(GlobalVolume::new(bevy::audio::Volume::Linear(1.0))); // Audio GlobalVolume
         
         // Physics
@@ -60,6 +148,8 @@ impl Plugin for ClientGamePlugin {
         app.add_plugins(CharacterControllerPlugin); // CharacterController
         app.add_plugins(ClientVoxelPlugin); // Voxel
         app.add_plugins(ItemPlugin); // Items
+        #[cfg(feature = "target_native_os")]
+        app.add_plugins(super::editor::EditorViewPlugin);
         
         // Network
         app.add_plugins(ClientNetworkPlugin); // Client Network
@@ -69,6 +159,8 @@ impl Plugin for ClientGamePlugin {
         
         // ClientInfo
         app.insert_resource(ClientInfo::default());
+        app.insert_resource(EditorRuntime::default());
+        app.insert_resource(EditorViewportRttState::default());
         app.register_type::<ClientInfo>();
         
         super::settings::build_plugin(app); // Config
@@ -85,7 +177,7 @@ impl Plugin for ClientGamePlugin {
             app.add_systems(PostUpdate, debug_draw_gizmo.in_set(PhysicsSet::Writeback).run_if(condition::in_world));
             
             // World Inspector
-            #[cfg(feature = "bevy-inspector-egui")]
+            #[cfg(feature = "target_native_os")]
             app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new().run_if(|cli: Res<ClientInfo>| cli.dbg_inspector));
         }
 
@@ -96,6 +188,255 @@ impl Plugin for ClientGamePlugin {
         app.add_plugins(DDGIPlugin);
 
         app.add_systems(Startup, apply_graphics_settings);
+        app.add_systems(Update, ensure_editor_viewport_camera.run_if(condition::in_world));
+        app.add_systems(Update, resize_editor_viewport_target.run_if(condition::in_world));
+        app.add_systems(Update, apply_editor_render_mode.run_if(condition::in_world));
+        app.add_systems(Update, apply_editor_viewport_render_mode.run_if(condition::in_world));
+    }
+}
+
+fn apply_editor_render_mode(
+    cli: ResMut<ClientInfo>,
+    editor_runtime: Res<EditorRuntime>,
+) {
+    if !editor_runtime.is_changed() {
+        return;
+    }
+
+    let mut cli = cli;
+    match editor_runtime.render_mode {
+        EditorRenderMode::Lit => {
+            cli.render_fxaa = true;
+            cli.render_tonemapping = true;
+            cli.render_bloom = true;
+            cli.render_ssr = true;
+            cli.render_volumetric_fog = true;
+            cli.render_skybox = true;
+        }
+        EditorRenderMode::Flat => {
+            cli.render_fxaa = false;
+            cli.render_tonemapping = true;
+            cli.render_bloom = false;
+            cli.render_ssr = false;
+            cli.render_volumetric_fog = false;
+            cli.render_skybox = false;
+        }
+        EditorRenderMode::Performance => {
+            cli.render_fxaa = false;
+            cli.render_tonemapping = false;
+            cli.render_bloom = false;
+            cli.render_ssr = false;
+            cli.render_volumetric_fog = false;
+            cli.render_skybox = false;
+        }
+        EditorRenderMode::Wireframe => {
+            cli.render_fxaa = false;
+            cli.render_tonemapping = false;
+            cli.render_bloom = false;
+            cli.render_ssr = false;
+            cli.render_volumetric_fog = false;
+            cli.render_skybox = false;
+        }
+    }
+}
+
+fn apply_editor_viewport_render_mode(
+    mut commands: Commands,
+    editor_runtime: Res<EditorRuntime>,
+    cli: Res<ClientInfo>,
+    query_cam: Query<(
+        Entity,
+        Option<&Fxaa>,
+        Option<&Tonemapping>,
+        Option<&Bloom>,
+        Option<&bevy::light::VolumetricFog>,
+    ), With<EditorViewportCamera>>,
+    query_voxel_meshes: Query<(Entity, Option<&Wireframe>), With<VoxelChunkRenderMesh>>,
+) {
+    if !editor_runtime.is_changed() {
+        return;
+    }
+
+    let Ok((entity, has_fxaa, has_tonemapping, has_bloom, has_vol_fog)) = query_cam.single() else {
+        return;
+    };
+    let mut ent = commands.entity(entity);
+
+    match editor_runtime.render_mode {
+        EditorRenderMode::Lit => {
+            if has_fxaa.is_none() {
+                ent.insert(Fxaa::default());
+            }
+            if has_tonemapping.is_none() {
+                ent.insert(Tonemapping::TonyMcMapface);
+            }
+            if has_bloom.is_none() {
+                ent.insert(Bloom::default());
+            }
+            if has_vol_fog.is_none() {
+                ent.insert(bevy::light::VolumetricFog {
+                    ambient_color: Color::linear_rgb(
+                        cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                        cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                        cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                    ),
+                    ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
+                        cli.volumetric_fog_density,
+                    ),
+                    ..default()
+                });
+            }
+        }
+        EditorRenderMode::Flat => {
+            if has_fxaa.is_none() {
+                ent.insert(Fxaa::default());
+            }
+            if has_tonemapping.is_none() {
+                ent.insert(Tonemapping::TonyMcMapface);
+            }
+            if has_bloom.is_some() {
+                ent.remove::<Bloom>();
+            }
+            if has_vol_fog.is_some() {
+                ent.remove::<bevy::light::VolumetricFog>();
+            }
+        }
+        EditorRenderMode::Performance => {
+            if has_fxaa.is_some() {
+                ent.remove::<Fxaa>();
+            }
+            if has_tonemapping.is_some() {
+                ent.remove::<Tonemapping>();
+            }
+            if has_bloom.is_some() {
+                ent.remove::<Bloom>();
+            }
+            if has_vol_fog.is_some() {
+                ent.remove::<bevy::light::VolumetricFog>();
+            }
+        }
+        EditorRenderMode::Wireframe => {
+            if has_fxaa.is_some() {
+                ent.remove::<Fxaa>();
+            }
+            if has_tonemapping.is_some() {
+                ent.remove::<Tonemapping>();
+            }
+            if has_bloom.is_some() {
+                ent.remove::<Bloom>();
+            }
+            if has_vol_fog.is_some() {
+                ent.remove::<bevy::light::VolumetricFog>();
+            }
+        }
+    }
+
+    let enable_wireframe = editor_runtime.render_mode == EditorRenderMode::Wireframe;
+    for (mesh_entity, has_wireframe) in query_voxel_meshes.iter() {
+        let mut mesh_cmd = commands.entity(mesh_entity);
+        if enable_wireframe {
+            if has_wireframe.is_none() {
+                mesh_cmd.insert(Wireframe);
+            }
+        } else if has_wireframe.is_some() {
+            mesh_cmd.remove::<Wireframe>();
+        }
+    }
+}
+
+fn alloc_editor_viewport_image(images: &mut Assets<Image>, size: UVec2) -> Handle<Image> {
+    let extent = Extent3d {
+        width: size.x.max(1),
+        height: size.y.max(1),
+        depth_or_array_layers: 1,
+    };
+    let mut image = Image::new_fill(
+        extent,
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::bevy_default(),
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.usage = TextureUsages::RENDER_ATTACHMENT
+        | TextureUsages::TEXTURE_BINDING
+        | TextureUsages::COPY_SRC;
+    images.add(image)
+}
+
+fn ensure_editor_viewport_camera(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut rtt_state: ResMut<EditorViewportRttState>,
+    mut query_rtt_cam: Query<(Entity, &mut Camera, &mut Transform), With<EditorViewportCamera>>,
+    query_main_cam: Query<(&Transform, &Projection), (With<CharacterControllerCamera>, Without<EditorViewportCamera>)>,
+    cli: Res<ClientInfo>,
+    editor_runtime: Res<EditorRuntime>,
+) {
+    if rtt_state.image_handle.id() == Handle::<Image>::default().id() {
+        let initial = rtt_state.requested_size.max(UVec2::new(64, 64));
+        rtt_state.image_handle = alloc_editor_viewport_image(&mut images, initial);
+        rtt_state.allocated_size = initial;
+        rtt_state.texture_id = None;
+    }
+
+    let is_editor_view_3d = cli.curr_ui == CurrentUI::WorldEditor && editor_runtime.view_mode == EditorViewMode::View3D;
+
+    if let Ok((_entity, mut camera, mut cam_transform)) = query_rtt_cam.single_mut() {
+        camera.target = RenderTarget::Image(rtt_state.image_handle.clone().into());
+        camera.is_active = is_editor_view_3d;
+
+        if is_editor_view_3d {
+            if let Ok((main_transform, _)) = query_main_cam.single() {
+                cam_transform.translation = main_transform.translation;
+                cam_transform.rotation = main_transform.rotation;
+            }
+        }
+        return;
+    }
+
+    let mut transform = Transform::from_xyz(0.0, 120.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y);
+    let mut projection = Projection::Perspective(PerspectiveProjection::default());
+    if let Ok((main_transform, main_projection)) = query_main_cam.single() {
+        transform = *main_transform;
+        projection = main_projection.clone();
+    }
+
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            target: RenderTarget::Image(rtt_state.image_handle.clone().into()),
+            order: -10,
+            is_active: is_editor_view_3d,
+            ..default()
+        },
+        bevy::render::view::Hdr,
+        bevy::core_pipeline::prepass::DepthPrepass,
+        bevy::core_pipeline::prepass::DeferredPrepass,
+        bevy::core_pipeline::prepass::NormalPrepass,
+        projection,
+        transform,
+        EditorViewportCamera,
+        Name::new("EditorViewportCamera"),
+        Msaa::Off,
+    ));
+}
+
+fn resize_editor_viewport_target(
+    mut images: ResMut<Assets<Image>>,
+    mut rtt_state: ResMut<EditorViewportRttState>,
+    mut query_rtt_cam: Query<&mut Camera, With<EditorViewportCamera>>,
+) {
+    let requested = rtt_state.requested_size.max(UVec2::new(64, 64));
+    if requested == rtt_state.allocated_size {
+        return;
+    }
+
+    rtt_state.image_handle = alloc_editor_viewport_image(&mut images, requested);
+    rtt_state.allocated_size = requested;
+    rtt_state.texture_id = None;
+
+    if let Ok(mut camera) = query_rtt_cam.single_mut() {
+        camera.target = RenderTarget::Image(rtt_state.image_handle.clone().into());
     }
 }
 
@@ -232,9 +573,19 @@ pub struct ClientInfo {
     pub render_bloom: bool,
     pub render_ssr: bool,
     pub render_volumetric_fog: bool,
+    pub volumetric_fog_density: f32,
+    pub volumetric_fog_color: Vec3,
     pub render_skybox: bool,
 
     pub touch_controls_edit_mode: bool,
+
+    // Server-authoritative admin capabilities/state
+    pub is_owner: bool,
+    pub is_admin: bool,
+    pub admin_god_enabled: bool,
+    pub admin_noclip_enabled: bool,
+    pub admin_panel_open: bool,
+    pub global_editor_view: bool,
 
     // Control
     pub enable_cursor_look: bool,
@@ -275,9 +626,18 @@ impl Default for ClientInfo {
             render_bloom: true,
             render_ssr: true,
             render_volumetric_fog: true,
+            volumetric_fog_density: 2.2,
+            volumetric_fog_color: Vec3::ONE,
             render_skybox: true,
 
             touch_controls_edit_mode: false,
+
+            is_owner: false,
+            is_admin: false,
+            admin_god_enabled: false,
+            admin_noclip_enabled: false,
+            admin_panel_open: false,
+            global_editor_view: false,
 
             enable_cursor_look: true,
 
@@ -375,23 +735,25 @@ impl<'w, 's> EthertiaClient<'w, 's> {
         }
     }
 
-    pub fn select_active_world(&mut self, world_name: String, seed: u64) {
+    pub fn select_active_world(&mut self, meta: crate::voxel::WorldMeta) {
         let mut world_info = WorldInfo::default();
-        world_info.name = world_name.clone();
-        world_info.seed = seed;
+        world_info.name = meta.name.clone();
+        world_info.seed = meta.seed;
+        world_info.world_config = meta.config.clone();
 
         self.cmds.insert_resource(ActiveWorld {
-            name: world_name,
-            seed,
+            name: meta.name,
+            seed: meta.seed,
+            config: meta.config,
         });
         self.cmds.insert_resource(world_info);
     }
 
-    pub fn connect_local_world(&mut self, world_name: String, seed: u64, port: u16) {
+    pub fn connect_local_world(&mut self, meta: crate::voxel::WorldMeta, port: u16) {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = port;
-            self.select_active_world(world_name, seed);
+            self.select_active_world(meta);
             self.data().disconnected_reason.clear();
             self.data().curr_ui = CurrentUI::None;
             return;
@@ -399,7 +761,7 @@ impl<'w, 's> EthertiaClient<'w, 's> {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.select_active_world(world_name, seed);
+            self.select_active_world(meta);
             self.connect_server(format!("127.0.0.1:{}", port));
         }
     }

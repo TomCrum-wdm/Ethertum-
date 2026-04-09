@@ -128,17 +128,17 @@ pub fn ui_main_menu(
             }
 
             ui.add_space(12.);
-            if ui.btn_normal("复制诊断信息").clicked() {
+            if ui.btn_normal("Copy Diagnostic Info").clicked() {
                 let report = build_startup_diagnostic_report(&cli, &cfg);
                 ui.ctx().copy_text(report);
                 *copied_feedback = time.elapsed_secs();
             }
             if *copied_feedback > 0.0 && time.elapsed_secs() - *copied_feedback < 3.0 {
-                ui.small("已复制到剪贴板");
+                ui.small("Copied to clipboard");
             }
 
             let report_preview = build_startup_diagnostic_report(&cli, &cfg);
-            ui.collapsing("诊断信息预览", |ui| {
+            ui.collapsing("Diagnostic Preview", |ui| {
                 ui.code(report_preview);
             });
         });
@@ -188,6 +188,7 @@ pub fn ui_pause_menu(
     mut cli: EthertiaClient,
     mut player: ResMut<ClientPlayerInfo>,
     mut inv_ui_state: ResMut<super::items::InventoryUiState>,
+    mut vox_brush: ResMut<crate::voxel::VoxelBrush>,
     items: Option<Res<crate::item::Items>>,
     time: Res<Time>,
     mut last_save_feedback: Local<f32>,
@@ -202,12 +203,21 @@ pub fn ui_pause_menu(
     };
 
     egui::Window::new("Inventory").show(ctx_mut, |ui| {
-        ui_inventory(ui, &mut player.inventory, &items, &mut inv_ui_state);
+        super::items::ui_inventory_operation_first(ui, &mut player.inventory, &items, &mut inv_ui_state, Some(vox_brush));
     });
 
     super::new_egui_window("Pause")
         .anchor(Align2::CENTER_TOP, [0., 32.])
         .show(ctx_mut, |ui| {
+            ui.horizontal(|ui| {
+                if ui.add_sized([140.0, 42.0], egui::Button::new("Resume")).clicked() {
+                    cli.data().curr_ui = CurrentUI::None;
+                }
+                ui.label("Press ESC to return to game");
+            });
+
+            ui.add_space(10.0);
+
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut false, "Map");
                 ui.toggle_value(&mut false, "Inventory");
@@ -218,6 +228,18 @@ pub fn ui_pause_menu(
 
                 if ui.toggle_value(&mut false, "Settings").clicked() {
                     cli.data().curr_ui = CurrentUI::Settings;
+                }
+
+                if cli.data().is_admin && ui.toggle_value(&mut false, "Admin").clicked() {
+                    let state = &mut cli.data().admin_panel_open;
+                    *state = !*state;
+                }
+
+                if cli.data().is_admin && ui.toggle_value(&mut false, "World Editor").clicked() {
+                    let data = cli.data();
+                    data.curr_ui = CurrentUI::WorldEditor;
+                    data.global_editor_view = true;
+                    data.enable_cursor_look = false;
                 }
 
                 if ui.toggle_value(&mut false, "Save World").clicked() {
@@ -232,6 +254,9 @@ pub fn ui_pause_menu(
 
             if *last_save_feedback > 0.0 && time.elapsed_secs() - *last_save_feedback < 2.0 {
                 ui.small("World save requested");
+            }
+            if cli.data().is_admin {
+                ui.small("Tip: Press F10 to toggle World Editor mode quickly.");
             }
         });
 

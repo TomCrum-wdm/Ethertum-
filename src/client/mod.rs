@@ -17,7 +17,10 @@ pub mod prelude {
 
     pub use character_controller::{CharacterController, CharacterControllerBundle, CharacterControllerCamera, CharacterControllerPlugin};
     pub use client_world::{ClientPlayerInfo, DespawnOnWorldUnload, WorldInfo};
-    pub use game_client::{condition, ClientGamePlugin, ClientInfo, EthertiaClient};
+    pub use game_client::{
+        condition, ClientGamePlugin, ClientInfo, EditorBottomTab, EditorCameraMode, EditorRenderMode, EditorRuntime,
+        EditorViewMode, EditorViewportCamera, EditorViewportRttState, EthertiaClient,
+    };
     pub use input::{InputAction, TouchButtonState, TouchStickState};
     pub use settings::{ClientSettings, ServerListItem, TouchActionBinding};
     pub use ui::{CurrentUI, UiExtra};

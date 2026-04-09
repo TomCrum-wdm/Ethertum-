@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::*;
+use bevy_renet::renet::RenetClient;
 use leafwing_input_manager::prelude::*;
 use leafwing_input_manager::action_state::ActionState;
 use leafwing_input_manager::user_input::gamepad::GamepadStick;
@@ -8,11 +9,13 @@ use leafwing_input_manager::plugin::InputManagerPlugin;
 
 use crate::client::prelude::*;
 use crate::client::ui::*;
+use crate::net::{CPacket, RenetClientHelper};
 use crate::prelude::*;
 
 #[derive(Resource, Debug, Clone)]
 pub struct TouchStickState {
     pub move_axis: Vec2,
+    pub move_power: f32,
     pub move_center: Vec2,
     pub move_touch_id: Option<u64>,
     pub radius: f32,
@@ -33,12 +36,15 @@ pub struct TouchButtonState {
     pub sprint_just_pressed: bool,
     pub crouch_pressed: bool,
     pub crouch_just_pressed: bool,
+    pub vertical_axis: f32,
+    pub vertical_active: bool,
 }
 
 impl Default for TouchStickState {
     fn default() -> Self {
         Self {
             move_axis: Vec2::ZERO,
+            move_power: 0.0,
             move_center: Vec2::ZERO,
             move_touch_id: None,
             radius: 120.0,
@@ -61,15 +67,15 @@ pub fn init(app: &mut App) {
         // bevy_touch_stick 0.2 depends on bevy 0.13 and is not compatible with bevy 0.17.
         // Keep the startup hook so Android-specific input UI can be reintroduced with a compatible implementation.
         app.add_systems(Startup, setup_touch_sticks);
-        app.add_systems(PreUpdate, update_touch_sticks);
     }
+
+    app.add_systems(PreUpdate, update_touch_sticks);
 }
 
 #[cfg(target_os = "android")]
 fn setup_touch_sticks(_cmds: Commands, _asset_server: Res<AssetServer>) {
 }
 
-#[cfg(target_os = "android")]
 fn stick_axis_from_touch(position: Vec2, center: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
     if radius <= 0.0 {
         return Vec2::ZERO;
@@ -97,9 +103,9 @@ fn stick_axis_from_touch(position: Vec2, center: Vec2, radius: f32, dead_zone: f
     }
 }
 
-#[cfg(target_os = "android")]
 fn update_touch_sticks(
     touches: Res<Touches>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut state: ResMut<TouchStickState>,
     query_window: Query<&Window, With<PrimaryWindow>>,
     cli: Res<ClientInfo>,
@@ -115,6 +121,7 @@ fn update_touch_sticks(
     state.active = enabled;
     if !enabled {
         state.move_axis = Vec2::ZERO;
+        state.move_power = 0.0;
         state.move_touch_id = None;
         state.sprint_locked = false;
         return;
@@ -130,8 +137,19 @@ fn update_touch_sticks(
     state.radius = touch_cfg.move_stick_radius.clamp(48.0, 200.0);
     state.dead_zone = touch_cfg.move_dead_zone.clamp(0.0, 0.9);
 
+    let mouse_pos = if mouse_buttons.pressed(MouseButton::Left) {
+        window.cursor_position()
+    } else {
+        None
+    };
+
     if let Some(id) = state.move_touch_id {
-        if touches.iter().all(|t| t.id() != id) {
+        let lost_touch = if id == 0 {
+            mouse_pos.is_none()
+        } else {
+            touches.iter().all(|t| t.id() != id)
+        };
+        if lost_touch {
             state.move_touch_id = None;
         }
     }
@@ -140,25 +158,39 @@ fn update_touch_sticks(
         let activate_radius = state.radius * 1.4;
         if let Some(touch) = touches.iter().find(|t| t.position().distance(stick_center) <= activate_radius) {
             state.move_touch_id = Some(touch.id());
+        } else if let Some(pos) = mouse_pos {
+            if pos.distance(stick_center) <= activate_radius {
+                state.move_touch_id = Some(0);
+            }
         }
     }
 
-    let move_touch = state.move_touch_id.and_then(|id| touches.iter().find(|t| t.id() == id).map(|t| t.position()));
+    let move_touch = match state.move_touch_id {
+        Some(0) => mouse_pos,
+        Some(id) => touches.iter().find(|t| t.id() == id).map(|t| t.position()),
+        None => None,
+    };
 
     if let Some(p) = move_touch {
-        // Push joystick to top edge to latch sprint; pull down below center to release.
-        if p.y <= state.move_center.y - state.radius * 0.90 {
+        let delta = p - state.move_center;
+        let raw_axis = if state.radius > 0.0 {
+            Vec2::new(delta.x, -delta.y) / state.radius
+        } else {
+            Vec2::ZERO
+        };
+        state.move_power = raw_axis.length();
+        state.move_axis = stick_axis_from_touch(p, state.move_center, state.radius, state.dead_zone);
+
+        // Sprint locks when the stick is pushed hard forward, and unlocks when pulled back inward.
+        if !state.sprint_locked && state.move_power >= 1.5 && state.move_axis.y > 0.25 {
             state.sprint_locked = true;
-        } else if p.y >= state.move_center.y + state.radius * 0.10 {
+        } else if state.sprint_locked && state.move_power <= 1.0 {
             state.sprint_locked = false;
         }
     } else {
-        state.sprint_locked = false;
+        state.move_axis = Vec2::ZERO;
+        state.move_power = 0.0;
     }
-
-    state.move_axis = move_touch
-        .map(|p| stick_axis_from_touch(p, state.move_center, state.radius, state.dead_zone))
-        .unwrap_or(Vec2::ZERO);
 }
 
 
@@ -239,10 +271,12 @@ pub fn input_handle(
     mut query_window: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     mut query_cursor_options: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut query_controller: Query<&mut CharacterController>,
+    mut net_client: Option<ResMut<RenetClient>>,
 
     worldinfo: Option<ResMut<WorldInfo>>,
     player: Option<ResMut<ClientPlayerInfo>>,
     mut cli: ResMut<ClientInfo>,
+    mut editor_runtime: ResMut<EditorRuntime>,
     cfg: Res<ClientSettings>,
 ) {
     let Ok(action_state) = query_input.single() else {
@@ -254,11 +288,21 @@ pub fn input_handle(
     let Ok(mut primary_cursor_options) = query_cursor_options.single_mut() else {
         return;
     };
+    let has_world = worldinfo.is_some();
 
     // ESC or Android back button
     if action_state.just_pressed(&InputAction::ESC) || key.just_pressed(KeyCode::Escape) {
         if cli.curr_ui == CurrentUI::MainMenu {
             // on main menu ESC should exit app, not close.
+        } else if cli.curr_ui == CurrentUI::PauseMenu {
+            cli.curr_ui = CurrentUI::None;
+        } else if cli.curr_ui == CurrentUI::WorldEditor {
+            cli.curr_ui = CurrentUI::None;
+            cli.global_editor_view = false;
+            cli.enable_cursor_look = true;
+            editor_runtime.view_mode = EditorViewMode::View3D;
+        } else if cli.curr_ui == CurrentUI::Settings && has_world {
+            cli.curr_ui = CurrentUI::PauseMenu;
         } else if cli.curr_ui == CurrentUI::None {
             cli.curr_ui = CurrentUI::PauseMenu;
         } else {
@@ -279,7 +323,7 @@ pub fn input_handle(
 
     // Enable Character Controlling
     if let Ok(ctr) = &mut query_controller.single_mut() {
-        ctr.enable_input = curr_manipulating;
+        ctr.enable_input = curr_manipulating && !cli.global_editor_view;
         ctr.enable_input_cursor_look = cursor_grab;
     }
 
@@ -317,6 +361,51 @@ pub fn input_handle(
     // Toggle F12 Debug MenuBar
     if key.just_pressed(KeyCode::F12) {
         cli.dbg_menubar = !cli.dbg_menubar;
+    }
+
+    if !cli.is_admin {
+        cli.admin_panel_open = false;
+        cli.global_editor_view = false;
+        if cli.curr_ui == CurrentUI::WorldEditor {
+            cli.curr_ui = CurrentUI::None;
+            editor_runtime.view_mode = EditorViewMode::View3D;
+        }
+    }
+
+    if key.just_pressed(KeyCode::F8) && cli.is_admin {
+        cli.admin_panel_open = !cli.admin_panel_open;
+    }
+
+    if key.just_pressed(KeyCode::F10) && cli.is_admin && has_world {
+        if cli.curr_ui == CurrentUI::WorldEditor {
+            cli.curr_ui = CurrentUI::None;
+            cli.global_editor_view = false;
+            cli.enable_cursor_look = true;
+            editor_runtime.view_mode = EditorViewMode::View3D;
+        } else {
+            cli.curr_ui = CurrentUI::WorldEditor;
+            cli.global_editor_view = true;
+            cli.enable_cursor_look = false;
+            cli.admin_panel_open = false;
+            editor_runtime.view_mode = EditorViewMode::View3D;
+        }
+    }
+
+    if curr_manipulating && cli.is_admin {
+        if key.just_pressed(KeyCode::KeyG) {
+            if let Some(net_client) = net_client.as_mut() {
+                net_client.send_packet(&CPacket::AdminRequest {
+                    request: crate::net::AdminRequest::ToggleGod,
+                });
+            }
+        }
+        if key.just_pressed(KeyCode::KeyV) {
+            if let Some(net_client) = net_client.as_mut() {
+                net_client.send_packet(&CPacket::AdminRequest {
+                    request: crate::net::AdminRequest::ToggleNoclip,
+                });
+            }
+        }
     }
 
     // Toggle Fullscreen

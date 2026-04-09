@@ -3,6 +3,7 @@ use bevy::{
     diagnostic::{DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     prelude::*,
 };
+use bevy::light::VolumetricFog;
 use bevy_egui::{
     egui::{self, Align2, Color32, FontId, Frame, Id, LayerId, Layout, Widget},
     EguiContexts,
@@ -13,8 +14,9 @@ use std::sync::atomic::Ordering;
 
 use crate::{
     client::prelude::*,
+    net::{CPacket, RenetClientHelper},
     ui::{color32_of, CurrentUI, UiExtra},
-    util::{as_mut, AsMutRef},
+    util::AsMutRef,
     voxel::{self, lighting::VoxLightQueue, worldgen, Chunk, ChunkSystem, ClientChunkSystem, HitResult, Vox, VoxLight, VoxShape},
 };
 
@@ -24,6 +26,8 @@ pub fn ui_menu_panel(
     chunk_sys: Option<ResMut<ClientChunkSystem>>,
     mut cl: EthertiaClient,
     query_cam: Query<&Transform, With<CharacterControllerCamera>>,
+    query_vol_fog: Query<&VolumetricFog, With<CharacterControllerCamera>>,
+    query_sun: Query<(Entity, Option<&bevy::light::VolumetricLight>), With<crate::client::client_world::Sun>>,
 
     net_client: Option<Res<RenetClient>>,
     net_transport: Option<Res<NetcodeClientTransport>>,
@@ -80,25 +84,43 @@ pub fn ui_menu_panel(
                             let bytes_per_sec = ni.bytes_sent_per_second + ni.bytes_received_per_second;
 
                             ui.menu_button(format!("{}ms {}/s", ping.0, human_bytes(bytes_per_sec)), |ui| {
-                                ui.label(&cli.server_addr).on_hover_text("Server Addr"); // transport.netcode_client.server_addr()
-                                ui.add_space(12.);
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{}ms", ping.0)).on_hover_text("Latency / RTT");
-                                    ui.small(format!("{}ms\n{}ms", ping.1, ping.2))
-                                        .on_hover_text("Latency (Client to Server / Server to Client)");
-                                    ui.separator();
-                                    ui.label(format!("{}/s", human_bytes(bytes_per_sec))).on_hover_text("Bandwidth");
-                                    ui.small(format!(
-                                        "{}/s\n{}/s",
-                                        human_bytes(ni.bytes_sent_per_second),
-                                        human_bytes(ni.bytes_received_per_second)
-                                    ))
-                                    .on_hover_text("Bandwidth (Upload/Download)");
-                                    // ui.separator();
-                                    // ui.label("109M").on_hover_text("Transit");
-                                    // ui.small("108M\n30K").on_hover_text("Transit (Upload/Download)");
+                                let info_bg = Color32::from_rgba_unmultiplied(20, 24, 32, 220);
+                                egui::Frame::default().fill(info_bg).show(ui, |ui| {
+                                    ui.vertical(|ui| {
+                                        ui.colored_label(Color32::from_rgb(140, 200, 255), format!("Server: {}", &cli.server_addr))
+                                            .on_hover_text("Server Addr");
+                                        ui.add_space(4.);
+                                        ui.horizontal(|ui| {
+                                            let ping_color = if ping.0 < 80 {
+                                                Color32::from_rgb(100, 220, 120)
+                                            } else if ping.0 < 180 {
+                                                Color32::from_rgb(255, 200, 80)
+                                            } else {
+                                                Color32::from_rgb(255, 100, 100)
+                                            };
+                                            ui.colored_label(ping_color, format!("RTT {:>4} ms", ping.0))
+                                                .on_hover_text("Latency / RTT");
+                                            ui.separator();
+                                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{:>8}/s", human_bytes(bytes_per_sec)))
+                                                .on_hover_text("Bandwidth");
+                                            ui.small(format!(
+                                                "up {:>8}/s | down {:>8}/s",
+                                                human_bytes(ni.bytes_sent_per_second),
+                                                human_bytes(ni.bytes_received_per_second)
+                                            ))
+                                            .on_hover_text("Bandwidth (Upload/Download)");
+                                        });
+                                        ui.add_space(2.);
+                                        let loss_color = if ni.packet_loss == 0.0 {
+                                            Color32::from_rgb(100, 220, 120)
+                                        } else if ni.packet_loss < 2.0 {
+                                            Color32::from_rgb(255, 200, 80)
+                                        } else {
+                                            Color32::from_rgb(255, 100, 100)
+                                        };
+                                        ui.colored_label(loss_color, format!("loss: {}", ni.packet_loss));
+                                    });
                                 });
-                                ui.small(format!("loss: {}", ni.packet_loss));
                             });
                         }
                     }
@@ -122,6 +144,7 @@ pub fn ui_menu_panel(
 
                     // put inside a Layout::right_to_left(egui::Align::Center) or the Vertical Align will offset to upper.
                     ui.with_layout(Layout::left_to_right(egui::Align::BOTTOM), |ui| {
+                        let is_admin_user = cl.data().is_admin;
                         ui.add_space(12.);
                         ui.menu_button("System", |ui| {
                             ui.menu_button("Connect to Server", |ui| {
@@ -136,7 +159,14 @@ pub fn ui_menu_panel(
                                 ui.btn("Open World..").clicked();
                                 ui.separator();
                             });
-                            ui.btn("Edit World..").clicked();
+                            if ui.btn("Edit World..").clicked() {
+                                let cli = cl.data();
+                                if cli.is_admin {
+                                    cli.curr_ui = CurrentUI::WorldEditor;
+                                    cli.global_editor_view = true;
+                                    cli.enable_cursor_look = false;
+                                }
+                            }
                             if ui.btn("Close World").clicked() {
                                 cl.exit_world();
                             }
@@ -236,7 +266,161 @@ pub fn ui_menu_panel(
                                 }
                             }
                         });
-                        ui.menu_button("Render", |_ui| {});
+                        ui.menu_button("Render", |ui| {
+                            let cli = cl.data();
+
+                            let fog_status_color = if cli.render_volumetric_fog {
+                                Color32::from_rgb(100, 220, 120)
+                            } else {
+                                Color32::from_rgb(255, 120, 120)
+                            };
+                            ui.colored_label(fog_status_color, format!("Volumetric Fog: {}", if cli.render_volumetric_fog { "ON" } else { "OFF" }));
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Density: {:.2}", cli.volumetric_fog_density));
+
+                            match query_vol_fog.single() {
+                                Ok(vol_fog) => {
+                                    ui.colored_label(Color32::from_rgb(100, 220, 120), "Camera Fog Entity: PRESENT")
+                                        .on_hover_text(format!("ambient_intensity = {:.3}", vol_fog.ambient_intensity));
+                                }
+                                Err(_) => {
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Camera Fog Entity: MISSING");
+                                }
+                            }
+
+                            match query_sun.single() {
+                                Ok((_sun_entity, has_volumetric_light)) => {
+                                    let light_ok = has_volumetric_light.is_some();
+                                    ui.colored_label(
+                                        if light_ok { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
+                                        format!("Sun: PRESENT | VolumetricLight: {}", if light_ok { "YES" } else { "NO" }),
+                                    );
+                                }
+                                Err(_) => {
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Sun: MISSING");
+                                }
+                            }
+
+                            let fog_density = if cli.volumetric_fog_density.is_finite() {
+                                cli.volumetric_fog_density.clamp(0.0, 3.0)
+                            } else {
+                                0.0
+                            };
+                            let fog_visibility_scale = if cli.render_volumetric_fog {
+                                (1.0 / (1.0 + fog_density * fog_density * 2.0)).clamp(0.06, 1.0)
+                            } else {
+                                1.0
+                            };
+                            ui.separator();
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Visibility: {:.1}", cli.sky_fog_visibility));
+                            ui.colored_label(
+                                Color32::from_rgb(130, 200, 255),
+                                format!("Effective Visibility: {:.1}", cli.sky_fog_visibility * fog_visibility_scale),
+                            );
+                            ui.colored_label(
+                                if cli.sky_fog_is_atomspheric { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
+                                format!("Atmospheric: {}", if cli.sky_fog_is_atomspheric { "YES" } else { "NO" }),
+                            );
+                            ui.colored_label(
+                                if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
+                                    Color32::from_rgb(255, 200, 80)
+                                } else {
+                                    Color32::from_rgb(120, 220, 255)
+                                },
+                                format!(
+                                    "Dense Fallback: {}",
+                                    if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
+                                        "FORCED EXP2"
+                                    } else {
+                                        "OFF"
+                                    }
+                                ),
+                            );
+                        });
+                        ui.menu_button("Fog", |ui| {
+                            let cli = cl.data();
+                            let fog_status_color = if cli.render_volumetric_fog {
+                                Color32::from_rgb(100, 220, 120)
+                            } else {
+                                Color32::from_rgb(255, 120, 120)
+                            };
+                            ui.colored_label(fog_status_color, format!("Volumetric Fog: {}", if cli.render_volumetric_fog { "ON" } else { "OFF" }));
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Density: {:.2}", cli.volumetric_fog_density));
+                            match query_vol_fog.single() {
+                                Ok(vol_fog) => {
+                                    ui.colored_label(Color32::from_rgb(100, 220, 120), "Camera Fog Entity: PRESENT")
+                                        .on_hover_text(format!("ambient_intensity = {:.3}", vol_fog.ambient_intensity));
+                                }
+                                Err(_) => {
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Camera Fog Entity: MISSING");
+                                }
+                            }
+                            match query_sun.single() {
+                                Ok((_sun_entity, has_volumetric_light)) => {
+                                    let light_ok = has_volumetric_light.is_some();
+                                    ui.colored_label(
+                                        if light_ok { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
+                                        format!("Sun: PRESENT | VolumetricLight: {}", if light_ok { "YES" } else { "NO" }),
+                                    );
+                                }
+                                Err(_) => {
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Sun: MISSING");
+                                }
+                            }
+                            let fog_density = if cli.volumetric_fog_density.is_finite() {
+                                cli.volumetric_fog_density.clamp(0.0, 3.0)
+                            } else {
+                                0.0
+                            };
+                            let fog_visibility_scale = if cli.render_volumetric_fog {
+                                (1.0 / (1.0 + fog_density * fog_density * 2.0)).clamp(0.06, 1.0)
+                            } else {
+                                1.0
+                            };
+                            ui.separator();
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Visibility: {:.1}", cli.sky_fog_visibility));
+                            ui.colored_label(
+                                Color32::from_rgb(130, 200, 255),
+                                format!("Effective Visibility: {:.1}", cli.sky_fog_visibility * fog_visibility_scale),
+                            );
+                            ui.colored_label(
+                                if cli.sky_fog_is_atomspheric { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
+                                format!("Atmospheric: {}", if cli.sky_fog_is_atomspheric { "YES" } else { "NO" }),
+                            );
+                            ui.colored_label(
+                                if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
+                                    Color32::from_rgb(255, 200, 80)
+                                } else {
+                                    Color32::from_rgb(120, 220, 255)
+                                },
+                                format!(
+                                    "Dense Fallback: {}",
+                                    if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
+                                        "FORCED EXP2"
+                                    } else {
+                                        "OFF"
+                                    }
+                                ),
+                            );
+                        });
+                        if is_admin_user {
+                            ui.menu_button("Admin", |ui| {
+                                let cli = cl.data();
+                                ui.label(if cli.is_owner { "Role: Owner" } else { "Role: Admin" });
+                                ui.label(format!(
+                                    "God: {} | Noclip: {}",
+                                    if cli.admin_god_enabled { "ON" } else { "OFF" },
+                                    if cli.admin_noclip_enabled { "ON" } else { "OFF" }
+                                ));
+                                ui.label(format!(
+                                    "Global Editor View: {}",
+                                    if cli.global_editor_view { "ON (F7)" } else { "OFF (F7)" }
+                                ));
+                                if ui.button("Open Admin Panel (F8)").clicked() {
+                                    cli.admin_panel_open = true;
+                                }
+                                ui.small("Hotkeys: F10 world editor, F7 camera view, G toggle God, V toggle Noclip");
+                            });
+                        }
                         ui.menu_button("Audio", |_ui| {});
                         ui.menu_button("View", |ui| {
                             ui.toggle_value(&mut true, "HUD");
@@ -256,6 +440,467 @@ pub fn ui_menu_panel(
         });
 }
 
+pub fn ui_admin_panel(
+    mut ctx: EguiContexts,
+    mut cli: ResMut<ClientInfo>,
+    mut net_client: Option<ResMut<RenetClient>>,
+) {
+    if !cli.is_admin || !cli.admin_panel_open {
+        return;
+    }
+
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    let mut request: Option<crate::net::AdminRequest> = None;
+
+    egui::Window::new("Admin Panel")
+        .resizable(false)
+        .collapsible(false)
+        .default_width(320.0)
+        .anchor(Align2::RIGHT_TOP, [-14.0, 54.0])
+        .show(ctx_mut, |ui| {
+            ui.label(if cli.is_owner { "Role: Owner" } else { "Role: Admin" });
+            ui.separator();
+            ui.label(format!("God Mode: {}", if cli.admin_god_enabled { "Enabled" } else { "Disabled" }));
+            ui.label(format!(
+                "Noclip: {}",
+                if cli.admin_noclip_enabled { "Enabled" } else { "Disabled" }
+            ));
+            ui.label(format!(
+                "Global Editor View: {}",
+                if cli.global_editor_view { "Enabled" } else { "Disabled" }
+            ));
+
+            ui.add_space(6.0);
+            if ui.button("Toggle Global Editor View [F7]").clicked() {
+                cli.global_editor_view = !cli.global_editor_view;
+            }
+            if ui.button("Toggle God [G]").clicked() {
+                request = Some(crate::net::AdminRequest::ToggleGod);
+            }
+            if ui.button("Toggle Noclip [V]").clicked() {
+                request = Some(crate::net::AdminRequest::ToggleNoclip);
+            }
+            if ui.button("Request World Save").clicked() {
+                request = Some(crate::net::AdminRequest::SaveWorld);
+            }
+            if ui.button("Open World Editor [F10]").clicked() {
+                cli.curr_ui = CurrentUI::WorldEditor;
+                cli.global_editor_view = true;
+                cli.enable_cursor_look = false;
+            }
+
+            ui.add_space(8.0);
+            ui.small("Commands: /op <user>, /deop <user>, /god, /noclip, /time set <v>, /save");
+            ui.small("Server is authoritative: states update from server packets.");
+
+            if ui.button("Close").clicked() {
+                cli.admin_panel_open = false;
+            }
+        });
+
+    if let Some(request) = request {
+        if let Some(net_client) = net_client.as_mut() {
+            net_client.send_packet(&CPacket::AdminRequest { request });
+        }
+    }
+}
+
+pub fn ui_world_editor_panel(
+    mut ctx: EguiContexts,
+    mut cli: ResMut<ClientInfo>,
+    mut cfg: ResMut<ClientSettings>,
+    mut editor_runtime: ResMut<EditorRuntime>,
+    mut rtt_state: ResMut<EditorViewportRttState>,
+    mut vox_brush: ResMut<crate::voxel::VoxelBrush>,
+    chunk_sys: Res<ClientChunkSystem>,
+    meshing_stats: Option<Res<crate::voxel::VoxelMeshingStats>>,
+    worldgen_stats: Option<Res<crate::voxel::VoxelWorldGenStats>>,
+    diagnostics: Res<DiagnosticsStore>,
+    mut editor_queries: ParamSet<(
+        Query<&mut Transform, With<CharacterControllerCamera>>,
+        Query<(Entity, Option<&Name>, Option<&Transform>, Option<&GlobalTransform>)>,
+    )>,
+) {
+    if !cli.is_admin {
+        if cli.curr_ui == CurrentUI::WorldEditor {
+            cli.curr_ui = CurrentUI::None;
+        }
+        cli.global_editor_view = false;
+        return;
+    }
+
+    if rtt_state.texture_id.is_none() && rtt_state.image_handle.id() != Handle::<Image>::default().id() {
+        rtt_state.texture_id = Some(ctx.add_image(bevy_egui::EguiTextureHandle::Strong(
+            rtt_state.image_handle.clone(),
+        )));
+    }
+
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+
+    egui::TopBottomPanel::top("editor_workspace_top").show(ctx_mut, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Editor Workspace");
+            ui.separator();
+            if ui
+                .selectable_label(editor_runtime.view_mode == EditorViewMode::View3D, "Viewport 3D")
+                .clicked()
+            {
+                editor_runtime.view_mode = EditorViewMode::View3D;
+            }
+            if ui
+                .selectable_label(editor_runtime.view_mode == EditorViewMode::View2D, "Viewport 2D")
+                .clicked()
+            {
+                editor_runtime.view_mode = EditorViewMode::View2D;
+            }
+            ui.separator();
+
+            egui::ComboBox::from_id_salt("editor_camera_mode")
+                .selected_text(match editor_runtime.camera_mode {
+                    EditorCameraMode::Fly => "Camera: Fly",
+                    EditorCameraMode::Orbit => "Camera: Orbit",
+                    EditorCameraMode::TopDown => "Camera: TopDown",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Fly, "Fly");
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Orbit, "Orbit");
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::TopDown, "TopDown");
+                });
+
+            egui::ComboBox::from_id_salt("editor_render_mode")
+                .selected_text(match editor_runtime.render_mode {
+                    EditorRenderMode::Lit => "Render: Lit",
+                    EditorRenderMode::Flat => "Render: Flat",
+                    EditorRenderMode::Performance => "Render: Performance",
+                    EditorRenderMode::Wireframe => "Render: Wireframe",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Lit, "Lit");
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Flat, "Flat");
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Performance, "Performance");
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Wireframe, "Wireframe");
+                });
+
+            if ui.checkbox(&mut cli.dbg_gizmo_all_loaded_chunks, "Chunk Bounds").changed() {
+                cli.dbg_gizmo_curr_chunk = cli.dbg_gizmo_all_loaded_chunks;
+                cli.dbg_gizmo_remesh_chunks = cli.dbg_gizmo_all_loaded_chunks;
+            }
+
+            ui.separator();
+            ui.checkbox(&mut editor_runtime.show_help, "Help");
+            ui.separator();
+            ui.label("F10: Exit Editor");
+            ui.label("F9: Inspector");
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Exit [F10]").clicked() {
+                    cli.curr_ui = CurrentUI::None;
+                    cli.global_editor_view = false;
+                    cli.enable_cursor_look = true;
+                    editor_runtime.view_mode = EditorViewMode::View3D;
+                }
+            });
+        });
+    });
+
+    egui::TopBottomPanel::bottom("editor_workspace_bottom")
+        .resizable(true)
+        .default_height(145.0)
+        .show(ctx_mut, |ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Resources, "Resources")
+                    .clicked()
+                {
+                    editor_runtime.bottom_tab = EditorBottomTab::Resources;
+                }
+                if ui
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Diagnostics, "Diagnostics")
+                    .clicked()
+                {
+                    editor_runtime.bottom_tab = EditorBottomTab::Diagnostics;
+                }
+                if ui
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Assets, "Assets")
+                    .clicked()
+                {
+                    editor_runtime.bottom_tab = EditorBottomTab::Assets;
+                }
+            });
+            ui.separator();
+
+            match editor_runtime.bottom_tab {
+                EditorBottomTab::Resources => {
+                    ui.label("Voxel Brush");
+                    ui.add(egui::Slider::new(&mut vox_brush.size, 0.0..=32.0).text("Size"));
+                    ui.add(egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0).text("Intensity"));
+                    ui.add(egui::Slider::new(&mut vox_brush.tex, 0..=64).text("Material ID"));
+                    ui.horizontal(|ui| {
+                        if ui
+                            .selectable_label(vox_brush.shape == VoxShape::Isosurface, "Smooth")
+                            .clicked()
+                        {
+                            vox_brush.shape = VoxShape::Isosurface;
+                        }
+                        if ui
+                            .selectable_label(vox_brush.shape == VoxShape::Cube, "Cube")
+                            .clicked()
+                        {
+                            vox_brush.shape = VoxShape::Cube;
+                        }
+                    });
+                }
+                EditorBottomTab::Diagnostics => {
+                    let fps = diagnostics
+                        .get(&FrameTimeDiagnosticsPlugin::FPS)
+                        .and_then(|d| d.smoothed())
+                        .unwrap_or(0.0);
+                    let frame_ms = diagnostics
+                        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+                        .and_then(|d| d.smoothed())
+                        .unwrap_or(0.0);
+                    ui.label(format!("FPS: {:.1}", fps));
+                    ui.label(format!("Frame: {:.3} ms", frame_ms));
+                    ui.label(format!("Loaded Chunks: {}", chunk_sys.get_chunks().len()));
+                    ui.label(format!("Surface-First: {}", if cfg.surface_first_meshing { "ON" } else { "OFF" }));
+                    ui.label(format!("Surface-Only: {}", if cfg.surface_only_meshing { "ON" } else { "OFF" }));
+                    ui.label(format!("GPU WorldGen: {}", if cfg.gpu_worldgen { "ON" } else { "OFF" }));
+                    if let Some(stats) = meshing_stats {
+                        ui.separator();
+                        ui.label(format!("Remesh Queue: {}", stats.remesh_queue));
+                        ui.label(format!("Meshing Inflight: {}", stats.meshing_inflight));
+                        ui.label(format!("Fast Pending Upgrade: {}", stats.fast_pending_upgrade));
+                        ui.label(format!(
+                            "Submitted (S/F): {}/{}",
+                            stats.submitted_surface_this_frame,
+                            stats.submitted_full_this_frame
+                        ));
+                        ui.label(format!(
+                            "Completed Total (S/F): {}/{}",
+                            stats.completed_surface_total,
+                            stats.completed_full_total
+                        ));
+                    }
+                    if let Some(stats) = worldgen_stats {
+                        ui.separator();
+                        ui.label(format!("WorldGen Loading Queue: {}", stats.loading_queue));
+                        ui.label(format!("WorldGen Inflight: {}", stats.loading_inflight));
+                        ui.label(format!("GPU Batch Size: {}", stats.batch_size));
+                        ui.label(format!(
+                            "Submitted This Frame (GPU/CPU): {}/{}",
+                            stats.submitted_gpu_this_frame,
+                            stats.submitted_cpu_this_frame
+                        ));
+                        ui.label(format!(
+                            "Completed Total (GPU/CPU): {}/{}",
+                            stats.completed_gpu_total,
+                            stats.completed_cpu_total
+                        ));
+                    }
+                }
+                EditorBottomTab::Assets => {
+                    ui.label("Assets browser placeholder (phase 2).");
+                    ui.small("Next step: add texture/material list and quick-assign actions.");
+                }
+            }
+        });
+
+    egui::SidePanel::left("editor_workspace_hierarchy")
+        .default_width(260.0)
+        .show(ctx_mut, |ui| {
+            ui.heading("Hierarchy");
+            ui.separator();
+
+            let mut rows: Vec<(Entity, String)> = editor_queries
+                .p1()
+                .iter()
+                .map(|(entity, name, _, _)| {
+                    let label = name
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| format!("Entity {:?}", entity));
+                    (entity, label)
+                })
+                .collect();
+            rows.sort_by(|a, b| a.1.cmp(&b.1));
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (entity, label) in rows {
+                    let selected = editor_runtime.selected_entity.is_some_and(|v| v == entity);
+                    if ui.selectable_label(selected, label).clicked() {
+                        editor_runtime.selected_entity = Some(entity);
+                    }
+                }
+            });
+        });
+
+    egui::SidePanel::right("editor_workspace_inspector")
+        .default_width(300.0)
+        .show(ctx_mut, |ui| {
+            ui.heading("Inspector");
+            ui.separator();
+
+            if let Some(entity) = editor_runtime.selected_entity {
+                if let Ok((_, name, trans, gtrans)) = editor_queries.p1().get(entity) {
+                    let display_name = name
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| format!("Entity {:?}", entity));
+                    ui.label(display_name);
+                    ui.small(format!("Entity ID: {:?}", entity));
+                    ui.separator();
+
+                    if let Some(trans) = trans {
+                        ui.label("Transform");
+                        ui.small(format!(
+                            "pos: {:.2}, {:.2}, {:.2}",
+                            trans.translation.x, trans.translation.y, trans.translation.z
+                        ));
+                    }
+                    if let Some(gtrans) = gtrans {
+                        let pos = gtrans.translation();
+                        ui.label("Global Transform");
+                        ui.small(format!("pos: {:.2}, {:.2}, {:.2}", pos.x, pos.y, pos.z));
+                    }
+                } else {
+                    ui.small("Selected entity is no longer valid.");
+                    editor_runtime.selected_entity = None;
+                }
+            } else {
+                ui.small("Select an entity from Hierarchy.");
+            }
+
+            ui.separator();
+            ui.label("Admin State");
+            ui.small(format!("Role: {}", if cli.is_owner { "Owner" } else { "Admin" }));
+            ui.small(format!(
+                "God: {} | Noclip: {}",
+                if cli.admin_god_enabled { "ON" } else { "OFF" },
+                if cli.admin_noclip_enabled { "ON" } else { "OFF" }
+            ));
+        });
+
+    egui::CentralPanel::default().show(ctx_mut, |ui| {
+        ui.heading("Viewport");
+        if editor_runtime.show_help {
+            ui.small("W/A/S/D + Mouse: fly camera in 3D mode");
+            ui.small("Ctrl + Left/Right Click: sculpt terrain while editor UI is open");
+        }
+        ui.separator();
+
+        // Keep legacy flag disabled: viewport now uses an independent RTT camera.
+        cli.global_editor_view = false;
+
+        let loaded_count = chunk_sys.get_chunks().len();
+        ui.label(format!("Loaded Chunks: {}", loaded_count));
+
+        if loaded_count == 0 {
+            ui.small("No chunks loaded yet.");
+            return;
+        }
+
+        let mut min = IVec3::new(i32::MAX, i32::MAX, i32::MAX);
+        let mut max = IVec3::new(i32::MIN, i32::MIN, i32::MIN);
+        for cp in chunk_sys.get_chunks().keys() {
+            min = min.min(*cp);
+            max = max.max(*cp);
+        }
+
+        ui.small(format!(
+            "Loaded Bounds XZ: x {}..{}, z {}..{}",
+            min.x, max.x, min.z, max.z
+        ));
+
+        ui.horizontal(|ui| {
+            ui.label("Load Radius X");
+            ui.add(egui::Slider::new(&mut cfg.chunks_load_distance.x, 2..=64));
+            ui.label("Y");
+            ui.add(egui::Slider::new(&mut cfg.chunks_load_distance.y, 1..=32));
+            ui.checkbox(&mut editor_runtime.show_lod_overlay, "LOD Overlay");
+
+            if ui.button("Focus Loaded Bounds").clicked() {
+                if let Ok(mut cam) = editor_queries.p0().single_mut() {
+                    let cx = ((min.x + max.x) as f32) * 0.5;
+                    let cz = ((min.z + max.z) as f32) * 0.5;
+                    let span = (max - min).abs().max_element() as f32;
+                    cam.translation = Vec3::new(cx, (span + 32.0).max(64.0), cz);
+                }
+            }
+        });
+
+        let desired = egui::vec2(ui.available_width().max(300.0), ui.available_height().max(220.0));
+        let (response, painter) = ui.allocate_painter(desired, egui::Sense::hover());
+        let rect = response.rect;
+        painter.rect_filled(rect, 4.0, Color32::from_black_alpha(120));
+
+        if editor_runtime.view_mode == EditorViewMode::View3D {
+            let pixels_per_point = ctx_mut.pixels_per_point().max(0.5);
+            let requested = UVec2::new(
+                (rect.width() * pixels_per_point).round().max(1.0) as u32,
+                (rect.height() * pixels_per_point).round().max(1.0) as u32,
+            );
+            if requested != rtt_state.requested_size {
+                rtt_state.requested_size = requested;
+            }
+
+            if let Some(texture_id) = rtt_state.texture_id {
+                painter.image(
+                    texture_id,
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            } else {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Preparing offscreen viewport...",
+                    FontId::proportional(14.0),
+                    Color32::from_gray(210),
+                );
+            }
+
+            painter.text(
+                rect.left_top() + egui::vec2(8.0, 8.0),
+                Align2::LEFT_TOP,
+                format!("RTT {}x{}", rtt_state.allocated_size.x, rtt_state.allocated_size.y),
+                FontId::monospace(12.0),
+                Color32::from_white_alpha(220),
+            );
+        } else {
+            let cols = (max.x - min.x + 1).max(1) as f32;
+            let rows = (max.z - min.z + 1).max(1) as f32;
+            let cell_w = rect.width() / cols;
+            let cell_h = rect.height() / rows;
+
+            for cp in chunk_sys.get_chunks().keys() {
+                let x = (cp.x - min.x) as f32;
+                let z = (cp.z - min.z) as f32;
+                let c_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + x * cell_w, rect.top() + z * cell_h),
+                    egui::vec2(cell_w.max(1.0), cell_h.max(1.0)),
+                );
+                let color = if editor_runtime.show_lod_overlay {
+                    Color32::from_rgb(55, 144, 86)
+                } else {
+                    Color32::from_gray(95)
+                };
+                painter.rect_filled(c_rect.shrink(0.5), 0.0, color);
+            }
+
+            if let Ok(cam) = editor_queries.p0().single_mut() {
+                let cam_cp = Chunk::as_chunkpos(cam.translation.as_ivec3());
+                let x = (cam_cp.x - min.x) as f32 + 0.5;
+                let z = (cam_cp.z - min.z) as f32 + 0.5;
+                let marker = egui::pos2(rect.left() + x * cell_w, rect.top() + z * cell_h);
+                painter.circle_filled(marker, 4.0, Color32::YELLOW);
+            }
+        }
+    });
+}
+
 pub fn hud_debug_text(
     mut ctx: EguiContexts,
     time: Res<Time>,
@@ -267,8 +912,13 @@ pub fn hud_debug_text(
     // cli: Res<ClientInfo>,
     worldinfo: Option<Res<WorldInfo>>,
     chunk_sys: Option<Res<ClientChunkSystem>>,
+    worldgen_stats: Option<Res<crate::voxel::VoxelWorldGenStats>>,
     hit_result: Res<HitResult>,
     query_cam: Query<(&Transform, &bevy::camera::visibility::VisibleEntities), With<CharacterControllerCamera>>,
+    query_vol_fog: Query<&bevy::light::VolumetricFog, With<CharacterControllerCamera>>,
+    query_editor_cam: Query<&Camera, With<crate::client::game_client::EditorViewportCamera>>,
+    query_sun: Query<(Entity, Option<&bevy::light::VolumetricLight>), With<crate::client::client_world::Sun>>,
+    cli: Res<ClientInfo>,
     mut last_cam_pos: Local<Vec3>,
 ) {
     let mut str_sys = String::default();
@@ -408,19 +1058,101 @@ ChunkSys: {} loaded, {num_chunks_loading} loading, {num_chunks_remesh} remesh, {
         .get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT)
         .map_or(0., |f| f.smoothed().unwrap_or_default()) as usize;
 
+    let fog_entity_status = if query_vol_fog.single().is_ok() { "PRESENT" } else { "MISSING" };
+    let sun_status = match query_sun.single() {
+        Ok((_e, vol)) => {
+            if vol.is_some() {
+                "PRESENT + VOL_LIGHT"
+            } else {
+                "PRESENT (NO VOL_LIGHT)"
+            }
+        }
+        Err(_) => "MISSING",
+    };
+
+    let fog_density = if cli.volumetric_fog_density.is_finite() {
+        cli.volumetric_fog_density.clamp(0.0, 3.0)
+    } else {
+        0.0
+    };
+    let fog_visibility_scale = if cli.render_volumetric_fog {
+        (1.0 / (1.0 + fog_density * fog_density * 2.0)).clamp(0.06, 1.0)
+    } else {
+        1.0
+    };
+    let fog_visibility_effective = cli.sky_fog_visibility * fog_visibility_scale;
+    let fog_dense_fallback = cli.render_volumetric_fog && fog_density >= 1.5;
+    let editor_cam_status = match query_editor_cam.single() {
+        Ok(cam) => {
+            if cam.is_active {
+                "ON"
+            } else {
+                "OFF"
+            }
+        }
+        Err(_) => "MISSING",
+    };
+
     let str = format!(
         "fps: {fps:.1}, dt: {frame_time:.4}ms
 entity: vis {cam_visible_entities_num} / all {num_entity}
+    FogDbg: enabled={} density={:.2} cam_fog={} sun={} vis={:.1}->{:.1} fallback={} editor_view={} editor_cam={}
 {str_sys}
 {str_world}
 "
+    ,
+        if cli.render_volumetric_fog { "ON" } else { "OFF" },
+        cli.volumetric_fog_density,
+        fog_entity_status,
+        sun_status,
+        cli.sky_fog_visibility,
+        fog_visibility_effective,
+        if fog_dense_fallback { "FORCED_EXP2" } else { "OFF" },
+        if cli.global_editor_view { "ON" } else { "OFF" },
+        editor_cam_status,
     );
+
+    let mut wg_banner = "WORLDGEN: UNKNOWN";
+    let mut wg_color = Color32::from_rgb(120, 120, 120);
+    if let Some(stats) = worldgen_stats {
+        wg_banner = if stats.force_cpu_persisted_world {
+            "WORLDGEN: CPU (Persisted Save Compatibility Lock)"
+        } else if stats.last_backend_label == "GPU->CPU FALLBACK" {
+            "WORLDGEN: GPU->CPU FALLBACK"
+        } else if stats.last_backend_label == "GPU" {
+            "WORLDGEN: GPU"
+        } else if stats.last_backend_label == "CPU" {
+            "WORLDGEN: CPU"
+        } else {
+            stats.last_backend_label
+        };
+
+        wg_color = if stats.force_cpu_persisted_world {
+            Color32::from_rgb(255, 190, 60)
+        } else if stats.last_backend_label == "GPU->CPU FALLBACK" {
+            Color32::from_rgb(255, 90, 90)
+        } else if stats.last_backend_label == "GPU" {
+            Color32::from_rgb(70, 230, 120)
+        } else {
+            Color32::from_rgb(255, 220, 90)
+        };
+    }
 
     let Ok(ctx_mut) = ctx.ctx_mut() else {
         return;
     };
-    ctx_mut.layer_painter(LayerId::new(egui::Order::Middle, Id::NULL)).text(
-        [0., 48.].into(),
+    let painter = ctx_mut.layer_painter(LayerId::new(egui::Order::Middle, Id::NULL));
+    let banner_rect = egui::Rect::from_min_size([0.0, 28.0].into(), egui::vec2(560.0, 18.0));
+    painter.rect_filled(banner_rect, 2.0, Color32::from_black_alpha(170));
+    painter.text(
+        [6.0, 30.0].into(),
+        Align2::LEFT_TOP,
+        wg_banner,
+        FontId::proportional(13.),
+        wg_color,
+    );
+    painter.text(
+        [0., 50.].into(),
         Align2::LEFT_TOP,
         str,
         FontId::proportional(12.),

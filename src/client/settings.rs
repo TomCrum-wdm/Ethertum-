@@ -1,9 +1,4 @@
-use bevy::reflect::{Reflect, TypePath, FromReflect};
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
-pub enum TerrainMode {
-    Planet,
-    Flat,
-}
+use bevy::reflect::{FromReflect, Reflect, TypePath};
 
 // ClientSettings Configs
 
@@ -50,6 +45,8 @@ fn on_app_init(mut cfg: ResMut<ClientSettings>) {
             debug!("Skip loading {}: {err}", cfg_path.display());
         }
     }
+
+    cfg.sanitize();
 }
 
 fn on_app_exit(mut exit_events: EventReader<bevy::app::AppExit>, cfg: Res<ClientSettings>) {
@@ -103,6 +100,10 @@ pub struct TouchControlsConfig {
     pub jump_button_pos: [f32; 2],
     pub sprint_button_pos: [f32; 2],
     pub crouch_button_pos: [f32; 2],
+    pub vertical_slider_pos: [f32; 2],
+    pub vertical_slider_height: f32,
+    pub vertical_slider_width: f32,
+    pub fly_double_tap_window_secs: f32,
     pub button_radius: f32,
 
     pub attack_button_action: TouchActionBinding,
@@ -115,7 +116,7 @@ pub struct TouchControlsConfig {
 impl Default for TouchControlsConfig {
     fn default() -> Self {
         Self {
-            move_stick_pos: [0.18, 0.80],
+            move_stick_pos: [0.11, 0.80],
             move_stick_radius: 120.0,
             move_dead_zone: 0.06,
 
@@ -124,6 +125,10 @@ impl Default for TouchControlsConfig {
             jump_button_pos: [0.90, 0.66],
             sprint_button_pos: [0.64, 0.68],
             crouch_button_pos: [0.76, 0.66],
+            vertical_slider_pos: [0.88, 0.68],
+            vertical_slider_height: 220.0,
+            vertical_slider_width: 64.0,
+            fly_double_tap_window_secs: 0.46,
             button_radius: 44.0,
 
             attack_button_action: TouchActionBinding::Attack,
@@ -236,6 +241,7 @@ impl Default for ControlsConfig {
 }
 
 #[derive(Resource, Deserialize, Serialize, Reflect)]
+#[serde(default)]
 #[reflect(Resource)]
 pub struct ClientSettings {
     #[reflect(ignore)]
@@ -247,14 +253,30 @@ pub struct ClientSettings {
     pub vsync: bool,
     pub high_quality_rendering: bool,
     pub touch_ui: bool,
+    pub show_level_indicator: bool,
+    pub show_pitch_indicator: bool,
 
     pub chunks_load_distance: IVec2,
+    pub surface_first_meshing: bool,
+    pub surface_only_meshing: bool,
+    pub gpu_worldgen: bool,
+    pub gpu_worldgen_allow_persisted_world: bool,
+    pub gpu_worldgen_batch_size: i32,
+    pub gpu_worldgen_max_loading: i32,
+    pub cpu_worldgen_max_loading: i32,
+    pub gpu_worldgen_adaptive_backlog_mid: i32,
+    pub gpu_worldgen_adaptive_backlog_high: i32,
+    pub gpu_worldgen_adaptive_mult_low: i32,
+    pub gpu_worldgen_adaptive_mult_mid: i32,
+    pub gpu_worldgen_adaptive_mult_high: i32,
+    pub gpu_worldgen_adaptive_batch_min: i32,
+    pub gpu_worldgen_adaptive_batch_max: i32,
     
     #[serde(default)]
     #[reflect(ignore)]
     pub controls: ControlsConfig,
 
-    pub terrain_mode: TerrainMode, // 新增：地形模式
+    pub terrain_mode: crate::voxel::WorldTerrainMode,
 }
 
 impl Default for ClientSettings {
@@ -267,11 +289,48 @@ impl Default for ClientSettings {
             vsync: true,
             high_quality_rendering: true,
             touch_ui: true,
+            show_level_indicator: true,
+            show_pitch_indicator: true,
 
             chunks_load_distance: IVec2::new(4, 3),
+            surface_first_meshing: true,
+            surface_only_meshing: false,
+            gpu_worldgen: true,
+            gpu_worldgen_allow_persisted_world: false,
+            gpu_worldgen_batch_size: 16,
+            gpu_worldgen_max_loading: 256,
+            cpu_worldgen_max_loading: 8,
+            gpu_worldgen_adaptive_backlog_mid: 24,
+            gpu_worldgen_adaptive_backlog_high: 64,
+            gpu_worldgen_adaptive_mult_low: 2,
+            gpu_worldgen_adaptive_mult_mid: 4,
+            gpu_worldgen_adaptive_mult_high: 12,
+            gpu_worldgen_adaptive_batch_min: 16,
+            gpu_worldgen_adaptive_batch_max: 768,
             controls: ControlsConfig::default(),
-            terrain_mode: TerrainMode::Planet, // 默认球体
+            terrain_mode: crate::voxel::WorldTerrainMode::Planet,
         }
+    }
+}
+
+impl ClientSettings {
+    pub fn sanitize(&mut self) {
+        self.fov = self.fov.clamp(10.0, 170.0);
+        self.hud_padding = self.hud_padding.clamp(0.0, 128.0);
+
+        self.chunks_load_distance.x = self.chunks_load_distance.x.max(2);
+        self.chunks_load_distance.y = self.chunks_load_distance.y.max(1);
+
+        self.gpu_worldgen_batch_size = self.gpu_worldgen_batch_size.max(1);
+        self.gpu_worldgen_max_loading = self.gpu_worldgen_max_loading.max(1);
+        self.cpu_worldgen_max_loading = self.cpu_worldgen_max_loading.max(1);
+        self.gpu_worldgen_adaptive_backlog_mid = self.gpu_worldgen_adaptive_backlog_mid.max(1);
+        self.gpu_worldgen_adaptive_backlog_high = self.gpu_worldgen_adaptive_backlog_high.max(self.gpu_worldgen_adaptive_backlog_mid);
+        self.gpu_worldgen_adaptive_mult_low = self.gpu_worldgen_adaptive_mult_low.max(1);
+        self.gpu_worldgen_adaptive_mult_mid = self.gpu_worldgen_adaptive_mult_mid.max(self.gpu_worldgen_adaptive_mult_low);
+        self.gpu_worldgen_adaptive_mult_high = self.gpu_worldgen_adaptive_mult_high.max(self.gpu_worldgen_adaptive_mult_mid);
+        self.gpu_worldgen_adaptive_batch_min = self.gpu_worldgen_adaptive_batch_min.max(1);
+        self.gpu_worldgen_adaptive_batch_max = self.gpu_worldgen_adaptive_batch_max.max(self.gpu_worldgen_adaptive_batch_min);
     }
 }
 

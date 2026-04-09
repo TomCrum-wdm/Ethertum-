@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bevy::{prelude::*, platform::collections::HashSet};
 use bevy_renet::{
-    renet::{ConnectionConfig, DefaultChannel, RenetServer, ServerEvent},
+    renet::{ClientId, ConnectionConfig, DefaultChannel, RenetServer, ServerEvent},
     netcode::{NetcodeServerTransport, NetcodeServerPlugin},
     RenetServerPlugin,
 };
@@ -11,8 +11,83 @@ use crate::{
     net::{packet::{CellData, InventoryDeltaEntry, NetItemStack}, CPacket, EntityId, RenetServerHelper, SPacket, PROTOCOL_ID},
     server::prelude::*,
     util::{current_timestamp_millis, AsMutRef},
-    voxel::{ChunkSystem, ServerChunkSystem},
+    voxel::{ActiveWorld, ChunkSystem, ServerChunkSystem, WorldSaveRequest},
 };
+
+fn username_equals(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+fn list_contains_username(list: &[String], username: &str) -> bool {
+    list.iter().any(|v| username_equals(v, username))
+}
+
+fn load_or_create_world_meta(active_world: &ActiveWorld) -> Option<crate::voxel::WorldMeta> {
+    match crate::voxel::load_world_meta(&active_world.name) {
+        Ok(meta) => Some(meta),
+        Err(err) => {
+            warn!(
+                "Failed to load world meta '{}': {}. Trying to create a new one.",
+                active_world.name,
+                err
+            );
+            match crate::voxel::create_world_with_config(
+                &active_world.name,
+                active_world.seed,
+                active_world.config.clone(),
+            ) {
+                Ok(meta) => Some(meta),
+                Err(create_err) => {
+                    warn!(
+                        "Failed to create world meta '{}' after load failure: {}",
+                        active_world.name,
+                        create_err
+                    );
+                    None
+                }
+            }
+        }
+    }
+}
+
+fn send_admin_state(server: &mut RenetServer, client_id: ClientId, player: &PlayerInfo) {
+    server.send_packet(
+        client_id,
+        &SPacket::AdminState {
+            state: player.admin_snapshot(),
+        },
+    );
+}
+
+fn remove_online_player_session(
+    server: &mut RenetServer,
+    serverinfo: &mut ServerInfo,
+    client_id: ClientId,
+    reason: &str,
+) {
+    if let Some(player) = serverinfo.online_players.remove(&client_id) {
+        info!(
+            "Removing online player session {} ({}) due to {}",
+            player.username,
+            client_id,
+            reason
+        );
+
+        serverinfo
+            .saved_inventories
+            .insert(player.username.clone(), player.inventory.clone());
+
+        server.broadcast_packet_chat(format!(
+            "Player {} left. ({}/N)",
+            player.username,
+            serverinfo.online_players.len()
+        ));
+
+        server.broadcast_packet(&SPacket::EntityDel {
+            entity_id: player.entity_id,
+        });
+    }
+}
 
 fn starter_inventory() -> Vec<NetItemStack> {
     let mut slots = vec![NetItemStack::default(); 36];
@@ -43,7 +118,7 @@ impl Plugin for ServerNetworkPlugin {
         app.add_plugins(NetcodeServerPlugin);
 
         app.insert_resource(RenetServer::new(ConnectionConfig {
-            server_channels_config: super::net_channel_config(20 * 1024 * 1024),
+            server_channels_config: super::net_channel_config(64 * 1024 * 1024),
             ..default()
         }));
 
@@ -74,8 +149,9 @@ pub fn server_sys(
     transport: Option<Res<NetcodeServerTransport>>,
 
     mut serverinfo: ResMut<ServerInfo>,
-    // mut worldinfo: ResMut<WorldInfo>,
-    // chunk_sys: ResMut<ServerChunkSystem>,
+    active_world: Res<ActiveWorld>,
+    mut chunk_sys: ResMut<ServerChunkSystem>,
+    mut save_req: ResMut<WorldSaveRequest>,
     mut cmds: Commands,
 ) {
     // If server failed to bind, skip processing
@@ -97,18 +173,21 @@ pub fn server_sys(
             }
             ServerEvent::ClientDisconnected { client_id, reason } => {
                 info!("Cli Disconnected {} {}", client_id, reason);
-
-                if let Some(player) = serverinfo.online_players.remove(client_id) {
-                    serverinfo
-                        .saved_inventories
-                        .insert(player.username.clone(), player.inventory.clone());
-
-                    server.broadcast_packet_chat(format!("Player {} left. ({}/N)", player.username, serverinfo.online_players.len()));
-
-                    server.broadcast_packet(&SPacket::EntityDel { entity_id: player.entity_id });
-                }
+                remove_online_player_session(&mut server, &mut serverinfo, *client_id, "disconnect event");
             }
         }
+    }
+
+    // Reconcile stale sessions when disconnect events are missed.
+    let connected_client_ids: HashSet<ClientId> = server.clients_id().into_iter().collect();
+    let stale_client_ids: Vec<ClientId> = serverinfo
+        .online_players
+        .keys()
+        .copied()
+        .filter(|id| !connected_client_ids.contains(id))
+        .collect();
+    for stale_id in stale_client_ids {
+        remove_online_player_session(&mut server, &mut serverinfo, stale_id, "missing from active client list");
     }
 
     // Receive message from all clients
@@ -130,18 +209,9 @@ pub fn server_sys(
                         server.send_packet_disconnect(client_id, "Server outdated.".into());
                     }
                 }
-                // CPacket::ServerQuery {} => {
-                //     server.send_packet(
-                //         client_id,
-                //         &SPacket::ServerInfo {
-                //             motd: "Motd".into(),
-                //             num_players_limit: 64,
-                //             num_players_online: 0,
-                //             protocol_version: PROTOCOL_ID,
-                //             favicon: "None".into(),
-                //         },
-                //     );
-                // }
+                CPacket::ServerQuery {} => {
+                    // Reserved for future server-info query path.
+                }
                 CPacket::Login {
                     uuid,
                     access_token,
@@ -149,17 +219,111 @@ pub fn server_sys(
                 } => {
                     info!("Login Requested: {} {} {}", uuid, access_token, username);
 
-                    if serverinfo.online_players.values().any(|v| &v.username == &username) {
-                        server.send_packet_disconnect(client_id, format!("Player {} already logged in", &username));
-                        continue;
+                    // If a duplicated username session exists, prefer the latest login
+                    // and evict the older session to avoid permanent lockout.
+                    let duplicate_ids: Vec<ClientId> = serverinfo
+                        .online_players
+                        .iter()
+                        .filter_map(|(online_id, v)| {
+                            if *online_id != client_id && username_equals(&v.username, &username) {
+                                Some(*online_id)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    for duplicate_id in duplicate_ids {
+                        server.send_packet_disconnect(
+                            duplicate_id,
+                            "You were disconnected because this account logged in from another session.".into(),
+                        );
+                        remove_online_player_session(
+                            &mut server,
+                            &mut serverinfo,
+                            duplicate_id,
+                            "duplicate username replaced by newer login",
+                        );
+                    }
+
+                    if serverinfo.online_players.contains_key(&client_id) {
+                        remove_online_player_session(
+                            &mut server,
+                            &mut serverinfo,
+                            client_id,
+                            "client re-login refresh",
+                        );
                     }
                     // 模拟登录验证
                     std::thread::sleep(Duration::from_millis(800));
 
-                    let entity_id = EntityId::from_server(cmds.spawn(Transform::default()).id());
+                    let mut is_owner = false;
+                    let mut is_admin = false;
+                    if let Some(mut meta) = load_or_create_world_meta(&active_world) {
+                        let mut meta_changed = false;
+                        if meta
+                            .owner_username
+                            .as_ref()
+                            .is_none_or(|owner| owner.trim().is_empty())
+                        {
+                            meta.owner_username = Some(username.clone());
+                            meta_changed = true;
+                            info!(
+                                "Assigned initial world owner '{}' for world '{}'",
+                                username,
+                                active_world.name
+                            );
+                        }
+
+                        if meta_changed {
+                            if let Err(err) = crate::voxel::save_world_meta(&meta) {
+                                warn!(
+                                    "Failed to persist owner bootstrap for world '{}': {}",
+                                    active_world.name,
+                                    err
+                                );
+                            }
+                        }
+
+                        is_owner = meta
+                            .owner_username
+                            .as_ref()
+                            .is_some_and(|owner| username_equals(owner, &username));
+                        is_admin = is_owner || list_contains_username(&meta.admin_usernames, &username);
+                    }
+
+                    let spawn_position = active_world.config.default_spawn_position_with_seed(active_world.seed);
+                    info!(
+                        "Spawn computed for {}: {} (seed={}, mode={:?})",
+                        username,
+                        spawn_position,
+                        active_world.seed,
+                        active_world.config.terrain_mode
+                    );
+                    let entity_id = EntityId::from_server(cmds.spawn(Transform::from_translation(spawn_position)).id());
 
                     // Login Success
-                    server.send_packet(client_id, &SPacket::LoginSuccess { player_entity: entity_id });
+                    server.send_packet(
+                        client_id,
+                        &SPacket::LoginSuccess {
+                            player_entity: entity_id,
+                            spawn_position,
+                        },
+                    );
+                    server.send_packet(
+                        client_id,
+                        &SPacket::WorldInit {
+                            world_name: active_world.name.clone(),
+                            seed: active_world.seed,
+                            world_config: active_world.config.clone(),
+                        },
+                    );
+                    server.send_packet(
+                        client_id,
+                        &SPacket::EntityPos {
+                            entity_id,
+                            position: spawn_position,
+                        },
+                    );
 
                     let inventory = serverinfo
                         .saved_inventories
@@ -175,6 +339,7 @@ pub fn server_sys(
                         &SPacket::EntityNew {
                             entity_id,
                             name: username.clone(),
+                            position: spawn_position,
                         },
                     );
 
@@ -185,6 +350,7 @@ pub fn server_sys(
                             &SPacket::EntityNew {
                                 entity_id: player.entity_id,
                                 name: player.username.clone(),
+                                position: player.position,
                             },
                         );
                         server.send_packet(
@@ -201,129 +367,403 @@ pub fn server_sys(
                         PlayerInfo {
                             username,
                             user_id: uuid,
+                            is_owner,
+                            is_admin,
+                            god_enabled: false,
+                            noclip_enabled: false,
                             client_id,
                             entity_id,
-                            position: Vec3::ZERO,
+                            position: spawn_position,
+                            last_valid_chunkpos: crate::voxel::Chunk::as_chunkpos(spawn_position.as_ivec3()),
                             chunks_loaded: HashSet::default(),
-                            chunks_load_distance: IVec2::new(-1, -1), // 4 2
+                            chunks_load_distance: IVec2::new(4, 3),
                             ping_rtt: 0,
                             inventory,
                         },
                     );
+
+                    if let Some(player) = serverinfo.online_players.get(&client_id) {
+                        send_admin_state(&mut server, client_id, player);
+                    }
                 }
-                // Play Stage:
-                _ => {
-                    // Requires Logged in.
-                    // 这几行应该有语法糖简化..
-                    let player = serverinfo.online_players.get_mut(&client_id);
-                    if player.is_none() {
+                CPacket::ChatMessage { message } => {
+                    let Some(issuer) = serverinfo.online_players.get(&client_id) else {
                         server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
                         continue;
+                    };
+                    let issuer_name = issuer.username.clone();
+                    let issuer_is_owner = issuer.is_owner;
+                    let issuer_is_admin = issuer.is_admin;
+
+                    if message.starts_with('/') {
+                        let Some(args) = shlex::split(&message[1..]) else {
+                            server.send_packet_chat(client_id, "Invalid command format".into());
+                            continue;
+                        };
+                        if args.is_empty() {
+                            server.send_packet_chat(client_id, "Empty command".into());
+                            continue;
+                        }
+
+                        match args[0].as_str() {
+                            "time" => {
+                                if !issuer_is_admin {
+                                    server.send_packet_chat(client_id, "Permission denied".into());
+                                    continue;
+                                }
+                                if args.get(1).is_some_and(|v| v == "set") {
+                                    let Some(daytime_raw) = args.get(2) else {
+                                        server.send_packet_chat(client_id, "Usage: /time set <value>".into());
+                                        continue;
+                                    };
+                                    let Ok(daytime) = daytime_raw.parse::<f32>() else {
+                                        server.send_packet_chat(client_id, "Invalid daytime value".into());
+                                        continue;
+                                    };
+                                    server.broadcast_packet(&SPacket::WorldTime { daytime });
+                                } else {
+                                    server.send_packet_chat(client_id, "Usage: /time set <value>".into());
+                                }
+                            }
+                            "op" => {
+                                if !issuer_is_owner {
+                                    server.send_packet_chat(client_id, "Only the world owner can grant admin.".into());
+                                    continue;
+                                }
+                                let Some(target_name) = args.get(1) else {
+                                    server.send_packet_chat(client_id, "Usage: /op <username>".into());
+                                    continue;
+                                };
+
+                                match crate::voxel::set_world_admin(&active_world.name, target_name, true) {
+                                    Ok(_) => {
+                                        let mut target_online: Option<ClientId> = None;
+                                        for (target_id, target_player) in serverinfo.online_players.iter_mut() {
+                                            if username_equals(&target_player.username, target_name) {
+                                                target_player.is_admin = true;
+                                                target_online = Some(*target_id);
+                                                break;
+                                            }
+                                        }
+                                        if let Some(target_id) = target_online {
+                                            if let Some(target_player) = serverinfo.online_players.get(&target_id) {
+                                                send_admin_state(&mut server, target_id, target_player);
+                                            }
+                                        }
+                                        server.broadcast_packet_chat(format!(
+                                            "[Admin] {} granted admin to {}",
+                                            issuer_name,
+                                            target_name
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        server.send_packet_chat(client_id, format!("Failed to grant admin: {}", err));
+                                    }
+                                }
+                            }
+                            "deop" => {
+                                if !issuer_is_owner {
+                                    server.send_packet_chat(client_id, "Only the world owner can revoke admin.".into());
+                                    continue;
+                                }
+                                let Some(target_name) = args.get(1) else {
+                                    server.send_packet_chat(client_id, "Usage: /deop <username>".into());
+                                    continue;
+                                };
+
+                                match crate::voxel::load_world_meta(&active_world.name) {
+                                    Ok(meta) => {
+                                        if meta
+                                            .owner_username
+                                            .as_ref()
+                                            .is_some_and(|owner| username_equals(owner, target_name))
+                                        {
+                                            server.send_packet_chat(client_id, "Cannot revoke owner privileges.".into());
+                                            continue;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        server.send_packet_chat(client_id, format!("Failed to read world meta: {}", err));
+                                        continue;
+                                    }
+                                }
+
+                                match crate::voxel::set_world_admin(&active_world.name, target_name, false) {
+                                    Ok(_) => {
+                                        let mut target_online: Option<ClientId> = None;
+                                        for (target_id, target_player) in serverinfo.online_players.iter_mut() {
+                                            if username_equals(&target_player.username, target_name) {
+                                                target_player.is_admin = target_player.is_owner;
+                                                if !target_player.is_admin {
+                                                    target_player.god_enabled = false;
+                                                    target_player.noclip_enabled = false;
+                                                }
+                                                target_online = Some(*target_id);
+                                                break;
+                                            }
+                                        }
+                                        if let Some(target_id) = target_online {
+                                            if let Some(target_player) = serverinfo.online_players.get(&target_id) {
+                                                send_admin_state(&mut server, target_id, target_player);
+                                            }
+                                        }
+                                        server.broadcast_packet_chat(format!(
+                                            "[Admin] {} revoked admin from {}",
+                                            issuer_name,
+                                            target_name
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        server.send_packet_chat(client_id, format!("Failed to revoke admin: {}", err));
+                                    }
+                                }
+                            }
+                            "god" => {
+                                if !issuer_is_admin {
+                                    server.send_packet_chat(client_id, "Permission denied".into());
+                                    continue;
+                                }
+                                if let Some(player) = serverinfo.online_players.get_mut(&client_id) {
+                                    player.god_enabled = if let Some(arg) = args.get(1) {
+                                        match arg.as_str() {
+                                            "on" | "1" | "true" => true,
+                                            "off" | "0" | "false" => false,
+                                            _ => !player.god_enabled,
+                                        }
+                                    } else {
+                                        !player.god_enabled
+                                    };
+                                    if !player.god_enabled {
+                                        player.noclip_enabled = false;
+                                    }
+                                }
+                                if let Some(player) = serverinfo.online_players.get(&client_id) {
+                                    send_admin_state(&mut server, client_id, player);
+                                    server.send_packet_chat(
+                                        client_id,
+                                        format!("God mode {}", if player.god_enabled { "enabled" } else { "disabled" }),
+                                    );
+                                }
+                            }
+                            "noclip" => {
+                                if !issuer_is_admin {
+                                    server.send_packet_chat(client_id, "Permission denied".into());
+                                    continue;
+                                }
+                                if let Some(player) = serverinfo.online_players.get_mut(&client_id) {
+                                    let requested = if let Some(arg) = args.get(1) {
+                                        match arg.as_str() {
+                                            "on" | "1" | "true" => true,
+                                            "off" | "0" | "false" => false,
+                                            _ => !player.noclip_enabled,
+                                        }
+                                    } else {
+                                        !player.noclip_enabled
+                                    };
+
+                                    if requested && !player.god_enabled {
+                                        player.god_enabled = true;
+                                    }
+                                    player.noclip_enabled = requested;
+                                }
+                                if let Some(player) = serverinfo.online_players.get(&client_id) {
+                                    send_admin_state(&mut server, client_id, player);
+                                    server.send_packet_chat(
+                                        client_id,
+                                        format!(
+                                            "Noclip {}",
+                                            if player.noclip_enabled { "enabled" } else { "disabled" }
+                                        ),
+                                    );
+                                }
+                            }
+                            "save" => {
+                                if !issuer_is_admin {
+                                    server.send_packet_chat(client_id, "Permission denied".into());
+                                    continue;
+                                }
+                                save_req.save_now = true;
+                                server.send_packet_chat(client_id, "World save requested".into());
+                            }
+                            _ => {
+                                server.send_packet_chat(client_id, format!("Unknown command: {}", args[0]));
+                            }
+                        }
+
+                        info!("[CMD]: {:?}", args);
+                    } else {
+                        server.broadcast_packet_chat(format!("<{}>: {}", issuer_name, message));
                     }
-                    let Some(player) = player else {
+                }
+                CPacket::LoadDistance { load_distance } => {
+                    let Some(player) = serverinfo.online_players.get_mut(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    };
+                    player.chunks_load_distance = IVec2::new(load_distance.x.max(2), load_distance.y.max(1));
+                }
+                CPacket::PlayerPos { position } => {
+                    let Some(player) = serverinfo.online_players.get_mut(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
                         continue;
                     };
 
-                    match packet {
-                        CPacket::ChatMessage { message } => {
-                            if message.starts_with('/') {
-                                let Some(args) = shlex::split(&message[1..]) else {
-                                    server.send_packet_chat(client_id, "Invalid command format".into());
-                                    continue;
-                                };
-                                if args.is_empty() {
-                                    server.send_packet_chat(client_id, "Empty command".into());
-                                    continue;
-                                }
+                    if !position.is_finite() {
+                        warn!("Ignored invalid PlayerPos from {}: {}", player.username, position);
+                        continue;
+                    }
 
-                                if args[0] == "time" {
-                                    if args.get(1).is_some_and(|v| v == "set") {
-                                        let Some(daytime_raw) = args.get(2) else {
-                                            server.send_packet_chat(client_id, "Usage: /time set <value>".into());
-                                            continue;
-                                        };
-                                        let Ok(daytime) = daytime_raw.parse::<f32>() else {
-                                            server.send_packet_chat(client_id, "Invalid daytime value".into());
-                                            continue;
-                                        };
-                                        server.broadcast_packet(&SPacket::WorldTime { daytime });
-                                    } else {
-                                        server.send_packet_chat(client_id, "Current time is ".into());
-                                    }
-                                }
-                                info!("[CMD]: {:?}", args);
-                            } else {
-                                server.broadcast_packet_chat(format!("<{}>: {}", player.username, message.clone()));
-                            }
-                        }
-                        CPacket::LoadDistance { load_distance } => {
-                            player.chunks_load_distance = load_distance;
-                        }
-                        CPacket::PlayerPos { position } => {
-                            // todo: check diff, skip the same
+                    player.position = position;
+                    player.last_valid_chunkpos = crate::voxel::Chunk::as_chunkpos(position.as_ivec3());
+                    server.broadcast_packet_except(
+                        client_id,
+                        &SPacket::EntityPos {
+                            entity_id: player.entity_id,
+                            position,
+                        },
+                    );
+                }
+                CPacket::Ping {
+                    client_time,
+                    last_rtt,
+                } => {
+                    let Some(player) = serverinfo.online_players.get_mut(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    };
 
-                            player.position = position;
+                    player.ping_rtt = last_rtt;
+                    server.send_packet(
+                        client_id,
+                        &SPacket::Pong {
+                            client_time,
+                            server_time: current_timestamp_millis(),
+                        },
+                    );
+                }
+                CPacket::PlayerList => {
+                    if !serverinfo.online_players.contains_key(&client_id) {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    }
+                    let playerlist = serverinfo
+                        .online_players
+                        .iter()
+                        .map(|e| (e.1.username.clone(), e.1.ping_rtt))
+                        .collect();
+                    server.send_packet(client_id, &SPacket::PlayerList { playerlist });
+                }
+                CPacket::InventorySwap { a, b } => {
+                    let Some(player) = serverinfo.online_players.get_mut(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    };
 
-                            server.broadcast_packet_except(
-                                client_id,
-                                &SPacket::EntityPos {
-                                    entity_id: player.entity_id,
-                                    position,
+                    let a_idx = a as usize;
+                    let b_idx = b as usize;
+                    if a_idx >= player.inventory.len() || b_idx >= player.inventory.len() {
+                        warn!("InventorySwap out of range: {} <-> {}", a, b);
+                        continue;
+                    }
+
+                    player.inventory.swap(a_idx, b_idx);
+
+                    server.send_packet(
+                        client_id,
+                        &SPacket::InventoryDelta {
+                            changes: vec![
+                                InventoryDeltaEntry {
+                                    slot: a,
+                                    stack: player.inventory[a_idx],
                                 },
-                            );
-                        }
-                        CPacket::Ping { client_time, last_rtt } => {
-                            player.ping_rtt = last_rtt;
-
-                            server.send_packet(
-                                client_id,
-                                &SPacket::Pong {
-                                    client_time,
-                                    server_time: current_timestamp_millis(),
+                                InventoryDeltaEntry {
+                                    slot: b,
+                                    stack: player.inventory[b_idx],
                                 },
-                            );
-                        }
-                        CPacket::PlayerList => {
-                            let playerlist = serverinfo.online_players.iter().map(|e| (e.1.username.clone(), e.1.ping_rtt)).collect();
-                            server.send_packet(client_id, &SPacket::PlayerList { playerlist });
-                        }
-                        CPacket::InventorySwap { a, b } => {
-                            let a_idx = a as usize;
-                            let b_idx = b as usize;
-                            if a_idx >= player.inventory.len() || b_idx >= player.inventory.len() {
-                                warn!("InventorySwap out of range: {} <-> {}", a, b);
+                            ],
+                        },
+                    );
+                }
+                CPacket::AdminRequest { request } => {
+                    let Some(player) = serverinfo.online_players.get_mut(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    };
+
+                    match request {
+                        crate::net::AdminRequest::RequestState => {}
+                        crate::net::AdminRequest::ToggleGod => {
+                            if !player.is_admin {
+                                server.send_packet_chat(client_id, "Permission denied".into());
                                 continue;
                             }
-
-                            player.inventory.swap(a_idx, b_idx);
-
-                            server.send_packet(
-                                client_id,
-                                &SPacket::InventoryDelta {
-                                    changes: vec![
-                                        InventoryDeltaEntry {
-                                            slot: a,
-                                            stack: player.inventory[a_idx],
-                                        },
-                                        InventoryDeltaEntry {
-                                            slot: b,
-                                            stack: player.inventory[b_idx],
-                                        },
-                                    ],
-                                },
-                            );
+                            player.god_enabled = !player.god_enabled;
+                            if !player.god_enabled {
+                                player.noclip_enabled = false;
+                            }
                         }
-                        // CPacket::ChunkModify { chunkpos, voxel } => {
-                        // todo: NonLock
-                        // let chunk = chunk_sys.get_chunk(chunkpos).unwrap();
-
-                        // CellData::to_chunk(&voxel, chunk.as_ref_mut());
-
-                        // server.broadcast_packet(&SPacket::ChunkModify { chunkpos, voxel });
-                        // }
-                        _ => {
-                            warn!("Unknown Packet {:?}", packet);
+                        crate::net::AdminRequest::SetGod { enabled } => {
+                            if !player.is_admin {
+                                server.send_packet_chat(client_id, "Permission denied".into());
+                                continue;
+                            }
+                            player.god_enabled = enabled;
+                            if !player.god_enabled {
+                                player.noclip_enabled = false;
+                            }
                         }
+                        crate::net::AdminRequest::ToggleNoclip => {
+                            if !player.is_admin {
+                                server.send_packet_chat(client_id, "Permission denied".into());
+                                continue;
+                            }
+                            if !player.god_enabled {
+                                player.god_enabled = true;
+                            }
+                            player.noclip_enabled = !player.noclip_enabled;
+                        }
+                        crate::net::AdminRequest::SetNoclip { enabled } => {
+                            if !player.is_admin {
+                                server.send_packet_chat(client_id, "Permission denied".into());
+                                continue;
+                            }
+                            if enabled && !player.god_enabled {
+                                player.god_enabled = true;
+                            }
+                            player.noclip_enabled = enabled;
+                        }
+                        crate::net::AdminRequest::SaveWorld => {
+                            if !player.is_admin {
+                                server.send_packet_chat(client_id, "Permission denied".into());
+                                continue;
+                            }
+                            save_req.save_now = true;
+                            server.send_packet_chat(client_id, "World save requested".into());
+                        }
+                    }
+
+                    if let Some(player) = serverinfo.online_players.get(&client_id) {
+                        send_admin_state(&mut server, client_id, player);
+                    }
+                }
+                CPacket::ChunkModify { chunkpos, voxel } => {
+                    let Some(player) = serverinfo.online_players.get(&client_id) else {
+                        server.send_packet_disconnect(client_id, "illegal play-stage packet. you have not login yet".into());
+                        continue;
+                    };
+                    if !player.is_admin {
+                        server.send_packet_chat(client_id, "Permission denied: editing requires admin.".into());
+                        continue;
+                    }
+
+                    if let Some(chunk) = chunk_sys.get_chunk(chunkpos) {
+                        CellData::to_chunk(&voxel, chunk.as_mut());
+                        server.broadcast_packet_on(
+                            bevy_renet::renet::DefaultChannel::ReliableUnordered,
+                            &SPacket::ChunkModify { chunkpos, voxel },
+                        );
+                    } else {
+                        server.send_packet_chat(client_id, format!("Chunk {} is not loaded on server", chunkpos));
                     }
                 }
             }

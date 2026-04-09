@@ -70,10 +70,24 @@ impl Plugin for UiPlugin {
                     /* test */
                     ui_example_system,
                     /* debug */
-                    debug::ui_menu_panel.run_if(|cli: Res<ClientInfo>| cli.dbg_menubar),
+                    debug::ui_menu_panel
+                        .run_if(|cli: Res<ClientInfo>| cli.dbg_menubar)
+                        .run_if(|cli: Res<ClientInfo>| cli.curr_ui != CurrentUI::WorldEditor),
                     debug::hud_debug_text.run_if(|cli: Res<ClientInfo>| cli.dbg_text).before(debug::ui_menu_panel),
+                    debug::ui_admin_panel.run_if(condition::in_world),
+                    debug::ui_world_editor_panel
+                        .run_if(condition::in_world)
+                        .run_if(condition::in_ui(CurrentUI::WorldEditor)),
                     /* hud */
-                    (hud::hud_hotbar, hud::hud_chat, hud::hud_playerlist.run_if(condition::manipulating), hud::hud_touch_sticks).run_if(condition::in_world),
+                    (
+                        hud::hud_hotbar,
+                        hud::hud_attitude_indicators,
+                        hud::hud_chat,
+                        hud::hud_playerlist.run_if(condition::manipulating),
+                        hud::hud_touch_sticks,
+                    )
+                        .run_if(condition::in_world)
+                        .run_if(|cli: Res<ClientInfo>| cli.curr_ui != CurrentUI::WorldEditor),
                     items::draw_ui_holding_item,
                     /* menu */
                     (
@@ -153,6 +167,7 @@ pub enum CurrentUI {
     #[default]
     MainMenu,
     PauseMenu,
+    WorldEditor,
     Settings,
     ServerList,
     ConnectingServer,
@@ -255,13 +270,15 @@ pub fn color32_gray_alpha(gray: f32, alpha: f32) -> Color32 {
 fn setup_camera_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    cli: Res<ClientInfo>,
 ) {
-    spawn_main_camera(&mut commands, &asset_server);
+    spawn_main_camera(&mut commands, &asset_server, &cli);
 }
 
 fn ensure_world_camera_system(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    cli: Res<ClientInfo>,
     query_cam: Query<Entity, With<CharacterControllerCamera>>,
 ) {
     if !query_cam.is_empty() {
@@ -269,10 +286,10 @@ fn ensure_world_camera_system(
     }
 
     error!("No CharacterControllerCamera found while world is loaded. Recreating fallback camera.");
-    spawn_main_camera(&mut commands, &asset_server);
+    spawn_main_camera(&mut commands, &asset_server, &cli);
 }
 
-fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
+fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer, cli: &ClientInfo) {
     // WARNING: 不应该产生多个Camera 否则SSR不支持 很多东西也会非预期的绘制多次如gizmos
     // commands.spawn((
     //     Camera2d::default(),
@@ -328,7 +345,14 @@ fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
             .insert(Tonemapping::TonyMcMapface)
             .insert(Bloom::default())
             .insert(bevy::light::VolumetricFog {
-                ambient_intensity: 0.,
+                ambient_color: Color::linear_rgb(
+                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                ),
+                ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
+                    cli.volumetric_fog_density,
+                ),
                 ..default()
             });
     }
@@ -378,7 +402,14 @@ fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer) {
             .insert(Tonemapping::TonyMcMapface)
             .insert(Bloom::default())
             .insert(bevy::light::VolumetricFog {
-                ambient_intensity: 0.,
+                ambient_color: Color::linear_rgb(
+                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                ),
+                ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
+                    cli.volumetric_fog_density,
+                ),
                 ..default()
             });
     }
@@ -399,7 +430,7 @@ fn sync_camera_render_effects_system(
         Option<&bevy::light::VolumetricFog>,
     ), With<CharacterControllerCamera>>,
 ) {
-    let Ok((
+    for (
         camera_entity,
         has_skybox,
         has_envmap,
@@ -408,79 +439,85 @@ fn sync_camera_render_effects_system(
         has_bloom,
         has_ssr,
         has_vol_fog,
-    )) = query_cam.single() else {
-        return;
-    };
+    ) in query_cam.iter()
+    {
+        let mut ent = commands.entity(camera_entity);
 
-    let mut ent = commands.entity(camera_entity);
-
-    if cli.render_fxaa {
-        if has_fxaa.is_none() {
-            ent.insert(Fxaa::default());
+        if cli.render_fxaa {
+            if has_fxaa.is_none() {
+                ent.insert(Fxaa::default());
+            }
+        } else if has_fxaa.is_some() {
+            ent.remove::<Fxaa>();
         }
-    } else if has_fxaa.is_some() {
-        ent.remove::<Fxaa>();
-    }
 
-    if cli.render_tonemapping {
-        if has_tonemapping.is_none() {
-            ent.insert(Tonemapping::TonyMcMapface);
+        if cli.render_tonemapping {
+            if has_tonemapping.is_none() {
+                ent.insert(Tonemapping::TonyMcMapface);
+            }
+        } else if has_tonemapping.is_some() {
+            ent.remove::<Tonemapping>();
         }
-    } else if has_tonemapping.is_some() {
-        ent.remove::<Tonemapping>();
-    }
 
-    if cli.render_bloom {
-        if has_bloom.is_none() {
-            ent.insert(Bloom::default());
+        if cli.render_bloom {
+            if has_bloom.is_none() {
+                ent.insert(Bloom::default());
+            }
+        } else if has_bloom.is_some() {
+            ent.remove::<Bloom>();
         }
-    } else if has_bloom.is_some() {
-        ent.remove::<Bloom>();
-    }
 
-    if cli.render_ssr {
-        if has_ssr.is_none() {
-            ent.insert(ScreenSpaceReflections::default());
+        if cli.render_ssr {
+            if has_ssr.is_none() {
+                ent.insert(ScreenSpaceReflections::default());
+            }
+        } else if has_ssr.is_some() {
+            ent.remove::<ScreenSpaceReflections>();
         }
-    } else if has_ssr.is_some() {
-        ent.remove::<ScreenSpaceReflections>();
-    }
 
-    if cli.render_volumetric_fog {
-        if has_vol_fog.is_none() {
-            ent.insert(bevy::light::VolumetricFog {
-                ambient_intensity: 0.,
-                ..default()
-            });
-        }
-    } else if has_vol_fog.is_some() {
-        ent.remove::<bevy::light::VolumetricFog>();
-    }
-
-    if cli.render_skybox {
-        if let Some(cubemap) = skybox_cubemap {
-            if has_skybox.is_none() {
-                ent.insert(Skybox {
-                    image: cubemap.image_handle.clone(),
-                    brightness: 1000.0,
-                    ..Default::default()
+        if cli.render_volumetric_fog {
+            if has_vol_fog.is_none() {
+                ent.insert(bevy::light::VolumetricFog {
+                    ambient_color: Color::linear_rgb(
+                        cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                        cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                        cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                    ),
+                    ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
+                        cli.volumetric_fog_density,
+                    ),
+                    ..default()
                 });
             }
-            if has_envmap.is_none() {
-                ent.insert(EnvironmentMapLight {
-                    diffuse_map: cubemap.image_handle.clone(),
-                    specular_map: cubemap.image_handle.clone(),
-                    intensity: 1000.0,
-                    ..Default::default()
-                });
+        } else if has_vol_fog.is_some() {
+            ent.remove::<bevy::light::VolumetricFog>();
+        }
+
+        if cli.render_skybox {
+            if let Some(cubemap) = skybox_cubemap.as_ref() {
+                if has_skybox.is_none() {
+                    ent.insert(Skybox {
+                        image: cubemap.image_handle.clone(),
+                        brightness: 1000.0,
+                        ..Default::default()
+                    });
+                }
+                if has_envmap.is_none() {
+                    ent.insert(EnvironmentMapLight {
+                        diffuse_map: cubemap.image_handle.clone(),
+                        specular_map: cubemap.image_handle.clone(),
+                        intensity: 1000.0,
+                        ..Default::default()
+                    });
+                }
             }
-        }
-    } else {
-        if has_skybox.is_some() {
-            ent.remove::<Skybox>();
-        }
-        if has_envmap.is_some() {
-            ent.remove::<EnvironmentMapLight>();
+        } else {
+            if has_skybox.is_some() {
+                ent.remove::<Skybox>();
+            }
+            if has_envmap.is_some() {
+                ent.remove::<EnvironmentMapLight>();
+            }
         }
     }
 }
@@ -534,15 +571,18 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
         ),
     );
 
-    // 安卓端优先动态加载系统字体
+    // On Android, prefer dynamically loading a system CJK-capable font.
     #[cfg(target_os = "android")]
     let sys_font_bytes = match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
         Ok(bytes) => {
-            log::info!("[UI] Android系统字体加载成功: /system/fonts/DroidSansFallback.ttf, 大小: {} 字节", bytes.len());
+            log::info!(
+                "[UI] Android system font loaded: /system/fonts/DroidSansFallback.ttf ({} bytes)",
+                bytes.len()
+            );
             Some(bytes)
         },
         Err(e) => {
-            log::warn!("[UI] Android系统字体加载失败: {}", e);
+            log::warn!("[UI] Failed to load Android system font: {}", e);
             None
         }
     };
@@ -559,7 +599,7 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
 
     // Put my font first (highest priority):
     fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());
-    // 仅在系统字体实际加载成功时注册 fallback，避免安卓端因字体缺失导致启动卡死
+    // Register fallback only when system font loading succeeds to avoid startup stalls on missing fonts.
     if fonts.font_data.contains_key("noto_sans_sc") {
         fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
     }
@@ -749,6 +789,6 @@ impl UiExtra for Ui {
         }
     }
     fn btn_borderless(&mut self, text: impl Into<WidgetText>) -> Response {
-        sfx_play(self.add(egui::SelectableLabel::new(false, text)))
+        sfx_play(self.add(egui::Button::selectable(false, text)))
     }
 }

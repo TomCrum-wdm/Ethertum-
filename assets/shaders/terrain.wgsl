@@ -275,6 +275,7 @@ fn fragment(
     pbr_in.material.perceptual_roughness = min(pbr_in.material.perceptual_roughness, 1.0 - pbr_in.material.metallic);
     pbr_in.diffuse_occlusion = vec3<f32>(pow(occlusion, 0.25));
     pbr_in.specular_occlusion = occlusion;
+    pbr_in.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     
     //let ddgi_irradiance = sample_ddgi_irradiance(worldpos, world_normal);
     //pbr_in.diffuse_occlusion *= ddgi_irradiance;

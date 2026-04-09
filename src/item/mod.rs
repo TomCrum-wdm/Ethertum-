@@ -1,6 +1,7 @@
 use crate::util::registry::{RegId, Registry};
 
 use crate::prelude::*;
+use std::path::PathBuf;
 
 // pub struct Item {
 //     // tab_category
@@ -97,6 +98,12 @@ pub struct Items {
     pub defs: Vec<ItemDef>,
     pub atlas: Handle<Image>,
     pub atlas_egui: bevy_egui::egui::TextureId,
+    pub terrain_atlas: Handle<Image>,
+    pub terrain_atlas_egui: bevy_egui::egui::TextureId,
+    pub atlas_slot_count: usize,
+    pub atlas_slot_order: Vec<RegId>,
+    pub icon_handles: Vec<Option<Handle<Image>>>,
+    pub icon_egui: Vec<Option<bevy_egui::egui::TextureId>>,
 
     pub apple: RegId,
 
@@ -112,119 +119,159 @@ pub struct Items {
     pub iron_ingot: RegId,
 }
 
+fn atlas_item_names() -> &'static [&'static str] {
+    &[
+        "apple",
+        "avocado",
+        "coal",
+        "frame",
+        "lantern",
+        "pickaxe",
+        "shears",
+        "stick",
+        "grapple",
+        "iron_ingot",
+        "stone",
+    ]
+}
+
+fn item_icon_candidates(name: &str) -> [PathBuf; 3] {
+    [
+        PathBuf::from("assets").join("items").join(name).join("view.png"),
+        PathBuf::from("assets").join("items").join(name).join("icon.png"),
+        PathBuf::from("assets").join("items").join(format!("{name}.png")),
+    ]
+}
+
+fn item_icon_asset_path(name: &str) -> Option<String> {
+    for candidate in item_icon_candidates(name) {
+        if candidate.exists() {
+            let rel = candidate.strip_prefix("assets").ok()?.to_string_lossy().replace('\\', "/");
+            return Some(rel);
+        }
+    }
+    None
+}
+
 fn setup_items(
     mut items: ResMut<Items>,
     asset_server: Res<AssetServer>,
 ) {
-    let reg = &mut items.reg;
     let mut defs = Vec::new();
 
-    // 方块类物品注册及物理属性
-    let stone = reg.insert("stone");
-    defs.push(ItemDef {
-        name: "stone".to_string(),
-        props: MaterialProps { mass: 2.6, volume: 0.001, density: 2600.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let dirt = reg.insert("dirt");
-    defs.push(ItemDef {
-        name: "dirt".to_string(),
-        props: MaterialProps { mass: 1.2, volume: 0.001, density: 1200.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let grass = reg.insert("grass");
-    defs.push(ItemDef {
-        name: "grass".to_string(),
-        props: MaterialProps { mass: 1.1, volume: 0.001, density: 1100.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let sand = reg.insert("sand");
-    defs.push(ItemDef {
-        name: "sand".to_string(),
-        props: MaterialProps { mass: 1.6, volume: 0.001, density: 1600.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let log = reg.insert("log");
-    defs.push(ItemDef {
-        name: "log".to_string(),
-        props: MaterialProps { mass: 0.7, volume: 0.001, density: 700.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let leaves = reg.insert("leaves");
-    defs.push(ItemDef {
-        name: "leaves".to_string(),
-        props: MaterialProps { mass: 0.3, volume: 0.001, density: 300.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let water = reg.insert("water");
-    defs.push(ItemDef {
-        name: "water".to_string(),
-        props: MaterialProps { mass: 1.0, volume: 0.001, density: 1000.0, molar_mass: 18.0 },
-        category: ItemCategory::Main,
-    });
+    let (apple, coal, stick, frame, lantern, pickaxe, shears, grapple, iron_ingot) = {
+        let reg = &mut items.reg;
 
-    // 注册物品及其物理属性
-    let apple = reg.insert("apple");
-    defs.push(ItemDef {
-        name: "apple".to_string(),
-        props: MaterialProps { mass: 0.15, volume: 0.0002, density: 750.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    reg.insert("avocado"); // tmp
+        // 方块类物品注册及物理属性
+        let stone = reg.insert("stone");
+        defs.push(ItemDef {
+            name: "stone".to_string(),
+            props: MaterialProps { mass: 2.6, volume: 0.001, density: 2600.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let dirt = reg.insert("dirt");
+        defs.push(ItemDef {
+            name: "dirt".to_string(),
+            props: MaterialProps { mass: 1.2, volume: 0.001, density: 1200.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let grass = reg.insert("grass");
+        defs.push(ItemDef {
+            name: "grass".to_string(),
+            props: MaterialProps { mass: 1.1, volume: 0.001, density: 1100.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let sand = reg.insert("sand");
+        defs.push(ItemDef {
+            name: "sand".to_string(),
+            props: MaterialProps { mass: 1.6, volume: 0.001, density: 1600.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let log = reg.insert("log");
+        defs.push(ItemDef {
+            name: "log".to_string(),
+            props: MaterialProps { mass: 0.7, volume: 0.001, density: 700.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let leaves = reg.insert("leaves");
+        defs.push(ItemDef {
+            name: "leaves".to_string(),
+            props: MaterialProps { mass: 0.3, volume: 0.001, density: 300.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let water = reg.insert("water");
+        defs.push(ItemDef {
+            name: "water".to_string(),
+            props: MaterialProps { mass: 1.0, volume: 0.001, density: 1000.0, molar_mass: 18.0 },
+            category: ItemCategory::Main,
+        });
 
-    let coal = reg.insert("coal");
-    defs.push(ItemDef {
-        name: "coal".to_string(),
-        props: MaterialProps { mass: 0.05, volume: 0.00005, density: 1400.0, molar_mass: 12.0 },
-        category: ItemCategory::Main,
-    });
-    let stick = reg.insert("stick");
-    defs.push(ItemDef {
-        name: "stick".to_string(),
-        props: MaterialProps { mass: 0.02, volume: 0.00004, density: 500.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
+        // 注册物品及其物理属性
+        let apple = reg.insert("apple");
+        defs.push(ItemDef {
+            name: "apple".to_string(),
+            props: MaterialProps { mass: 0.15, volume: 0.0002, density: 750.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        reg.insert("avocado"); // tmp
 
-    let frame = reg.insert("frame");
-    defs.push(ItemDef {
-        name: "frame".to_string(),
-        props: MaterialProps { mass: 0.5, volume: 0.001, density: 800.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
-    let lantern = reg.insert("lantern");
-    defs.push(ItemDef {
-        name: "lantern".to_string(),
-        props: MaterialProps { mass: 0.3, volume: 0.0008, density: 1200.0, molar_mass: 0.0 },
-        category: ItemCategory::Main,
-    });
+        let coal = reg.insert("coal");
+        defs.push(ItemDef {
+            name: "coal".to_string(),
+            props: MaterialProps { mass: 0.05, volume: 0.00005, density: 1400.0, molar_mass: 12.0 },
+            category: ItemCategory::Main,
+        });
+        let stick = reg.insert("stick");
+        defs.push(ItemDef {
+            name: "stick".to_string(),
+            props: MaterialProps { mass: 0.02, volume: 0.00004, density: 500.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
 
-    let pickaxe = reg.insert("pickaxe");
-    defs.push(ItemDef {
-        name: "pickaxe".to_string(),
-        props: MaterialProps { mass: 1.2, volume: 0.002, density: 7800.0, molar_mass: 0.0 },
-        category: ItemCategory::Secondary,
-    });
-    let shears = reg.insert("shears");
-    defs.push(ItemDef {
-        name: "shears".to_string(),
-        props: MaterialProps { mass: 0.6, volume: 0.001, density: 7800.0, molar_mass: 0.0 },
-        category: ItemCategory::Secondary,
-    });
-    let grapple = reg.insert("grapple");
-    defs.push(ItemDef {
-        name: "grapple".to_string(),
-        props: MaterialProps { mass: 0.8, volume: 0.0015, density: 7800.0, molar_mass: 0.0 },
-        category: ItemCategory::Secondary,
-    });
-    let iron_ingot = reg.insert("iron_ingot");
-    defs.push(ItemDef {
-        name: "iron_ingot".to_string(),
-        props: MaterialProps { mass: 0.25, volume: 0.00003, density: 7800.0, molar_mass: 55.85 },
-        category: ItemCategory::Main,
-    });
+        let frame = reg.insert("frame");
+        defs.push(ItemDef {
+            name: "frame".to_string(),
+            props: MaterialProps { mass: 0.5, volume: 0.001, density: 800.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
+        let lantern = reg.insert("lantern");
+        defs.push(ItemDef {
+            name: "lantern".to_string(),
+            props: MaterialProps { mass: 0.3, volume: 0.0008, density: 1200.0, molar_mass: 0.0 },
+            category: ItemCategory::Main,
+        });
 
-    reg.build_num_id();
-    info!("Registered {} items: {:?}", reg.len(), reg.vec);
+        let pickaxe = reg.insert("pickaxe");
+        defs.push(ItemDef {
+            name: "pickaxe".to_string(),
+            props: MaterialProps { mass: 1.2, volume: 0.002, density: 7800.0, molar_mass: 0.0 },
+            category: ItemCategory::Secondary,
+        });
+        let shears = reg.insert("shears");
+        defs.push(ItemDef {
+            name: "shears".to_string(),
+            props: MaterialProps { mass: 0.6, volume: 0.001, density: 7800.0, molar_mass: 0.0 },
+            category: ItemCategory::Secondary,
+        });
+        let grapple = reg.insert("grapple");
+        defs.push(ItemDef {
+            name: "grapple".to_string(),
+            props: MaterialProps { mass: 0.8, volume: 0.0015, density: 7800.0, molar_mass: 0.0 },
+            category: ItemCategory::Secondary,
+        });
+        let iron_ingot = reg.insert("iron_ingot");
+        defs.push(ItemDef {
+            name: "iron_ingot".to_string(),
+            props: MaterialProps { mass: 0.25, volume: 0.00003, density: 7800.0, molar_mass: 55.85 },
+            category: ItemCategory::Main,
+        });
+
+        reg.build_num_id();
+        info!("Registered {} items: {:?}", reg.len(), reg.vec);
+
+        let _ = (stone, dirt, grass, sand, log, leaves, water);
+        (apple, coal, stick, frame, lantern, pickaxe, shears, grapple, iron_ingot)
+    };
 
     items.apple = apple;
     items.coal = coal;
@@ -237,7 +284,25 @@ fn setup_items(
     items.iron_ingot = iron_ingot;
 
     items.atlas = asset_server.load("baked/items.png");
+    items.terrain_atlas = asset_server.load("baked/atlas_diff.png");
     items.defs = defs;
+
+    if let Ok((width, height)) = image::image_dimensions("assets/baked/items.png") {
+        if height > 0 {
+            items.atlas_slot_count = (width / height) as usize;
+        }
+    }
+
+    items.atlas_slot_order = atlas_item_names()
+        .iter()
+        .filter_map(|name| items.reg.get(&name.to_string()))
+        .collect();
+
+    items.icon_handles = items
+        .defs
+        .iter()
+        .map(|def| item_icon_asset_path(&def.name).map(|path| asset_server.load(path)))
+        .collect();
 }
 
 fn setup_items_egui(
@@ -253,6 +318,19 @@ fn setup_items_egui(
     }
 
     items.atlas_egui = egui_ctx.add_image(bevy_egui::EguiTextureHandle::Strong(items.atlas.clone()));
+    items.terrain_atlas_egui = egui_ctx.add_image(bevy_egui::EguiTextureHandle::Strong(items.terrain_atlas.clone()));
+
+    if items.icon_egui.len() != items.icon_handles.len() {
+        items.icon_egui = items
+            .icon_handles
+            .iter()
+            .map(|handle| {
+                handle.as_ref().map(|handle| {
+                    egui_ctx.add_image(bevy_egui::EguiTextureHandle::Strong(handle.clone()))
+                })
+            })
+            .collect();
+    }
     *initialized = true;
 }
 

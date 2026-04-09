@@ -19,7 +19,7 @@ mod packet;
 use crate::util::current_timestamp;
 pub use netproc_client::ClientNetworkPlugin;
 pub use netproc_server::ServerNetworkPlugin;
-pub use packet::{CPacket, CellData, InventoryDeltaEntry, NetItemStack, SPacket};
+pub use packet::{AdminRequest, AdminStateSnapshot, CPacket, CellData, InventoryDeltaEntry, NetItemStack, SPacket};
 
 const PROTOCOL_ID: u64 = 1;
 
@@ -171,11 +171,15 @@ impl EntityId {
 // }
 
 pub trait RenetServerHelper {
+    fn send_packet_on<P: Serialize>(&mut self, client_id: ClientId, channel: DefaultChannel, packet: &P);
+
     fn send_packet<P: Serialize>(&mut self, client_id: ClientId, packet: &P);
 
     fn send_packet_disconnect(&mut self, client_id: ClientId, reason: String);
 
     fn send_packet_chat(&mut self, client_id: ClientId, message: String);
+
+    fn broadcast_packet_on<P: Serialize>(&mut self, channel: DefaultChannel, packet: &P);
 
     fn broadcast_packet<P: Serialize>(&mut self, packet: &P);
 
@@ -184,12 +188,16 @@ pub trait RenetServerHelper {
     fn broadcast_packet_chat(&mut self, message: String);
 }
 impl RenetServerHelper for RenetServer {
-    fn send_packet<P: Serialize>(&mut self, client_id: ClientId, packet: &P) {
+    fn send_packet_on<P: Serialize>(&mut self, client_id: ClientId, channel: DefaultChannel, packet: &P) {
         if let Ok(bytes) = bincode::serialize(packet) {
-            self.send_message(client_id, DefaultChannel::ReliableOrdered, bytes);
+            self.send_message(client_id, channel, bytes);
         } else {
             error!("Failed to serialize server packet for client {}", client_id);
         }
+    }
+
+    fn send_packet<P: Serialize>(&mut self, client_id: ClientId, packet: &P) {
+        self.send_packet_on(client_id, DefaultChannel::ReliableOrdered, packet);
     }
     fn send_packet_disconnect(&mut self, client_id: ClientId, reason: String) {
         self.send_packet(client_id, &SPacket::Disconnect { reason });
@@ -197,12 +205,16 @@ impl RenetServerHelper for RenetServer {
     fn send_packet_chat(&mut self, client_id: ClientId, message: String) {
         self.send_packet(client_id, &SPacket::Chat { message });
     }
-    fn broadcast_packet<P: Serialize>(&mut self, packet: &P) {
+    fn broadcast_packet_on<P: Serialize>(&mut self, channel: DefaultChannel, packet: &P) {
         if let Ok(bytes) = bincode::serialize(packet) {
-            self.broadcast_message(DefaultChannel::ReliableOrdered, bytes);
+            self.broadcast_message(channel, bytes);
         } else {
             error!("Failed to serialize broadcast packet");
         }
+    }
+
+    fn broadcast_packet<P: Serialize>(&mut self, packet: &P) {
+        self.broadcast_packet_on(DefaultChannel::ReliableOrdered, packet);
     }
     fn broadcast_packet_except<P: Serialize>(&mut self, except_id: ClientId, packet: &P) {
         if let Ok(bytes) = bincode::serialize(packet) {

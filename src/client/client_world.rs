@@ -1,10 +1,5 @@
 use std::f32::consts::PI;
 
-use bevy::post_process::bloom::Bloom;
-use bevy::anti_alias::fxaa::Fxaa;
-use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::core_pipeline::Skybox;
-use bevy::pbr::{ScreenSpaceReflections};
 use bevy::light::{VolumetricFog, VolumetricLight};
 use bevy_renet::netcode::NetcodeClientTransport;
 use bevy_renet::renet::RenetClient;
@@ -13,6 +8,12 @@ use crate::client::prelude::*;
 use crate::net::{CPacket, RenetClientHelper};
 use crate::prelude::*;
 use crate::util::TimeIntervals;
+
+pub fn volumetric_fog_intensity_from_density(density: f32) -> f32 {
+    let density = density.clamp(0.0, 3.0);
+    // Use a stronger curve so high-density settings remain clearly visible across day/night.
+    (0.18 + density * 0.9).clamp(0.08, 2.8)
+}
 
 pub fn init(app: &mut App) {
     app.register_type::<WorldInfo>();
@@ -26,6 +27,7 @@ pub fn init(app: &mut App) {
     app.add_systems(First, on_world_init.run_if(condition::load_world)); // Camera, Player, Sun
     app.add_systems(Last, on_world_exit.run_if(condition::unload_world()));
     app.add_systems(Update, tick_world.run_if(condition::in_world)); // Sun, World Timing.
+    app.add_systems(Update, ensure_volumetric_atmosphere.run_if(condition::in_world));
 }
 
 #[derive(Resource, Reflect)]
@@ -64,6 +66,8 @@ pub struct WorldInfo {
 
     pub name: String,
 
+    pub world_config: crate::voxel::WorldGenConfig,
+
     pub daytime: f32,
 
     // seconds a day time long
@@ -87,6 +91,7 @@ impl Default for WorldInfo {
         WorldInfo {
             seed: 0,
             name: "None Name".into(),
+            world_config: crate::voxel::WorldGenConfig::default(),
             daytime: 0.15,
             daytime_length: 60. * 24.,
 
@@ -109,89 +114,21 @@ pub struct DespawnOnWorldUnload;
 
 // Marker: Sun
 #[derive(Component)]
-struct Sun;
+pub(crate) struct Sun;
 
 fn on_world_init(
     mut cmds: Commands,
-    asset_server: Res<AssetServer>,
-    // materials: ResMut<Assets<StandardMaterial>>,
-    // meshes: ResMut<Assets<Mesh>>,
-    // cli: ResMut<ClientInfo>,
+    _asset_server: Res<AssetServer>,
 ) {
     info!("Load World. setup Player, Camera, Sun.");
 
-    // crate::net::netproc_client::spawn_player(
-    //     &mut cmds.spawn_empty(),
-    //     true,
-    //     &cli.cfg.username, &asset_server, &mut meshes, &mut materials);
-
-    // NOTE: Camera init has moved into UI Init. since Egui now requires Camera to render and we should only have 1 camera
-    /*  
-    let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
-    cmds.insert_resource(SkyboxCubemap {
-        is_loaded: false,
-        image_handle: skybox_image.clone()
-    });
-
-    // Camera
-    cmds.spawn((
-        Camera3d::default(),
-        Camera { hdr: true, ..default() },
-        /*
-        bevy::pbr::Atmosphere::EARTH,
-        bevy::pbr::AtmosphereSettings {
-            aerial_view_lut_max_distance: 3.2e5,
-            scene_units_to_m: 1e+4,
-            ..Default::default()
-        },
-        bevy::camera::Exposure::SUNLIGHT,
-        bevy::core_pipeline::tonemapping::Tonemapping::AcesFitted,
-        bevy::post_process::bloom::Bloom::NATURAL,
-        bevy::light::AtmosphereEnvironmentMapLight::default(),
-        */
-        // #[cfg(feature = "target_native_os")]
-        // bevy_atmosphere::plugin::AtmosphereCamera::default(), // Marks camera as having a skybox, by default it doesn't specify the render layers the skybox can be seen on
-        DistanceFog {
-            // color, falloff shoud be set in ClientInfo.sky_fog_visibility, etc. due to dynamic debug reason.
-            // falloff: FogFalloff::Atmospheric { extinction: Vec3::ZERO, inscattering:  Vec3::ZERO },  // mark as Atmospheric. value will be re-set by ClientInfo.sky_fog...
-            ..default()
-        },
-        Skybox {
-            image: skybox_image.clone(),
-            brightness: 1000.0,
-            ..Default::default()
-        },
-        EnvironmentMapLight {
-            diffuse_map: skybox_image.clone(),
-            specular_map: skybox_image.clone(),
-            intensity: 1000.0,
-            ..Default::default()
-        },
-        CharacterControllerCamera,
-        Name::new("Camera"),
-        DespawnOnWorldUnload,
-
-        // ScreenSpaceReflectionsBundle::default(),
-        // Fxaa::default(),
-    ))
-    .insert(ScreenSpaceReflections::default())
-    .insert(Fxaa::default())
-    .insert(Tonemapping::TonyMcMapface)
-    .insert(Bloom::default())
-    .insert(VolumetricFog {
-        ambient_intensity: 0.,
-        //density: 0.01,
-        //light_tint: Color::linear_rgb(0.916, 0.941, 1.000),
-        ..default()
-    })
-    ;
-    // .insert(ScreenSpaceAmbientOcclusionBundle::default())
-    // .insert(TemporalAntiAliasBundle::default());
-    */
-
     // Sun
     cmds.spawn((
-        DirectionalLight::default(),
+        DirectionalLight {
+            shadows_enabled: true,
+            illuminance: 40_000.0,
+            ..default()
+        },
         VolumetricLight,
         Sun, // Marks the light as Sun
         Name::new("Sun"),
@@ -199,18 +136,24 @@ fn on_world_init(
     ));
 }
 
-fn on_world_exit(mut cmds: Commands, query_despawn: Query<Entity, With<DespawnOnWorldUnload>>) {
+fn on_world_exit(
+    mut cmds: Commands,
+    query_despawn: Query<Entity, With<DespawnOnWorldUnload>>,
+    mut net_client: Option<ResMut<RenetClient>>,
+) {
     info!("Unload World");
 
     for entity in query_despawn.iter() {
         cmds.entity(entity).despawn();
     }
 
-    // todo: net_client.disconnect();  即时断开 否则服务器会觉得你假死 对其他用户体验不太好
+    if let Some(net_client) = net_client.as_mut() {
+        net_client.disconnect();
+    }
+
     cmds.remove_resource::<RenetClient>();
     cmds.remove_resource::<NetcodeClientTransport>();
 }
-
 
 #[derive(Resource)]
 pub struct SkyboxCubemap {
@@ -252,6 +195,7 @@ fn reinterpret_skybox_cubemap(
 }
 
 fn tick_world(
+        mut cmds: Commands,
     // #[cfg(feature = "target_native_os")] mut atmosphere: bevy_atmosphere::system_param::AtmosphereMut<bevy_atmosphere::prelude::Nishita>,
     mut query_sun: Query<(&mut Transform, &mut DirectionalLight), With<Sun>>,
     mut worldinfo: ResMut<WorldInfo>,
@@ -260,9 +204,19 @@ fn tick_world(
     query_player: Query<&Transform, (With<CharacterController>, Without<Sun>)>,
     mut net_client: Option<ResMut<RenetClient>>,
     mut last_player_pos: Local<Vec3>,
+    mut last_load_distance: Local<Option<IVec2>>,
 
-    mut query_fog: Query<&mut DistanceFog>,
+    mut query_fog: Query<
+        (Entity, Option<&mut DistanceFog>),
+        Or<(With<CharacterControllerCamera>, With<EditorViewportCamera>)>,
+    >,
+    mut query_vol_fog: Query<
+        (Entity, Option<&mut VolumetricFog>),
+        Or<(With<CharacterControllerCamera>, With<EditorViewportCamera>)>,
+    >,
+    mut ambient: ResMut<AmbientLight>,
     cli: Res<ClientInfo>,
+    cfg: Res<ClientSettings>,
 ) {
     // worldinfo.tick_timer.tick(time.delta());
     // if !worldinfo.tick_timer.just_finished() {
@@ -279,6 +233,23 @@ fn tick_world(
         }
     }
     let dt_sec = time.delta_secs();
+
+    let is_planet_world = worldinfo.world_config.terrain_mode == crate::voxel::WorldTerrainMode::Planet;
+    let planet_radius = worldinfo.world_config.planet_radius.max(16.0);
+    let small_planet_boost = if is_planet_world {
+        (256.0 / planet_radius).clamp(1.0, 4.0)
+    } else {
+        1.0
+    };
+
+    let base_ambient = if cfg!(target_os = "android") {
+        if cfg.high_quality_rendering { 1.8 } else { 1.3 }
+    } else if cfg.high_quality_rendering {
+        1.25
+    } else {
+        0.8
+    };
+    ambient.brightness = (base_ambient * small_planet_boost.sqrt()).clamp(base_ambient, base_ambient * 2.5);
 
     worldinfo.time_inhabited += dt_sec;
 
@@ -302,9 +273,15 @@ fn tick_world(
             }
         }
     }
-    // net_client.send_packet(&CPacket::LoadDistance {
-    //     load_distance: cli.chunks_load_distance,
-    // }); // todo: Only Send after Edit Dist Config
+
+    if last_load_distance.as_ref() != Some(&cfg.chunks_load_distance) {
+        *last_load_distance = Some(cfg.chunks_load_distance);
+        if let Some(net_client) = net_client.as_mut() {
+            net_client.send_packet(&CPacket::LoadDistance {
+                load_distance: cfg.chunks_load_distance,
+            });
+        }
+    }
 
     // Ping Network
     if time.at_interval(1.0) {
@@ -317,19 +294,93 @@ fn tick_world(
     }
 
     // Fog
-    if let Ok(mut fog) = query_fog.single_mut() {
-        fog.color = cli.sky_fog_color;
-        let visibility = if cli.sky_fog_visibility.is_finite() {
+    let fog_density = if cli.volumetric_fog_density.is_finite() {
+        cli.volumetric_fog_density.clamp(0.0, 3.0)
+    } else {
+        0.0
+    };
+    let volumetric_fog_color = Color::linear_rgb(
+        cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+        cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+        cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+    );
+    // Keep a visible fog floor even when volumetric scattering is too subtle on some GPUs.
+    // Density=0 keeps original visibility; density=2.2 => ~9%, density=3 => clamped to ~6%.
+    let density_visibility_scale = if cli.render_volumetric_fog {
+        (1.0 / (1.0 + fog_density * fog_density * 2.0)).clamp(0.06, 1.0)
+    } else {
+        1.0
+    };
+    let force_dense_fallback = cli.render_volumetric_fog && fog_density >= 1.5;
+    let mut needs_distance_fog_insert = Vec::new();
+    for (cam_entity, maybe_fog) in &mut query_fog {
+        let mut visibility = if cli.sky_fog_visibility.is_finite() {
             cli.sky_fog_visibility.max(0.001)
         } else {
             1200.0
+        } * small_planet_boost * density_visibility_scale;
+        if force_dense_fallback {
+            visibility = visibility.min((220.0 / (fog_density + 0.1)).max(24.0));
+        }
+
+        let Some(mut fog) = maybe_fog else {
+            needs_distance_fog_insert.push(cam_entity);
+            continue;
         };
-        if cli.sky_fog_is_atomspheric {
+
+        fog.color = cli.sky_fog_color;
+        if cli.sky_fog_is_atomspheric && !force_dense_fallback {
             // let FogFalloff::Atmospheric { .. } = fog.falloff {
             fog.falloff = FogFalloff::from_visibility_colors(visibility, cli.sky_extinction_color, cli.sky_inscattering_color);
         } else {
-            fog.falloff = FogFalloff::from_visibility_squared(visibility / 4.0);
+            fog.falloff = FogFalloff::from_visibility_squared(visibility / 1.4);
         }
+    }
+
+    for cam_entity in needs_distance_fog_insert {
+        let mut visibility = if cli.sky_fog_visibility.is_finite() {
+            cli.sky_fog_visibility.max(0.001)
+        } else {
+            1200.0
+        } * small_planet_boost * density_visibility_scale;
+        if force_dense_fallback {
+            visibility = visibility.min((220.0 / (fog_density + 0.1)).max(24.0));
+        }
+        let falloff = if cli.sky_fog_is_atomspheric && !force_dense_fallback {
+            FogFalloff::from_visibility_colors(visibility, cli.sky_extinction_color, cli.sky_inscattering_color)
+        } else {
+            FogFalloff::from_visibility_squared(visibility / 1.4)
+        };
+        cmds.entity(cam_entity).insert(DistanceFog {
+            color: cli.sky_fog_color,
+            falloff,
+            ..default()
+        });
+    }
+
+    let mut needs_insert = Vec::new();
+    for (cam_entity, maybe_vol_fog) in &mut query_vol_fog {
+        if !cli.render_volumetric_fog {
+            continue;
+        }
+        let Some(mut vol_fog) = maybe_vol_fog else {
+            needs_insert.push(cam_entity);
+            continue;
+        };
+
+        let base_ambient = volumetric_fog_intensity_from_density(fog_density);
+        vol_fog.ambient_intensity = (base_ambient * small_planet_boost.sqrt()).clamp(0.08, 3.0);
+        vol_fog.ambient_color = volumetric_fog_color;
+    }
+
+    for cam_entity in needs_insert {
+        cmds.entity(cam_entity).insert(VolumetricFog {
+            ambient_color: volumetric_fog_color,
+            ambient_intensity: (volumetric_fog_intensity_from_density(fog_density)
+                * small_planet_boost.sqrt())
+                .clamp(0.08, 3.0),
+            ..default()
+        });
     }
 
     // Sun Pos
@@ -342,10 +393,95 @@ fn tick_world(
     // atmosphere.sun_position = Vec3::new(sun_angle.cos(), sun_angle.sin(), 0.);
 
     if let Ok((mut light_trans, mut directional)) = query_sun.single_mut() {
-        directional.illuminance = sun_angle.sin().max(0.0).powf(2.0) * cli.skylight_illuminance * 1000.0;
-        directional.shadows_enabled = cli.skylight_shadow;
+        let daylight = sun_angle.sin().max(0.0).powf(2.0);
+        let fill = if is_planet_world {
+            0.02 + (small_planet_boost - 1.0) / 3.0 * 0.18
+        } else {
+            0.01
+        };
+        directional.illuminance = (daylight + fill) * cli.skylight_illuminance * 1000.0;
+        directional.shadows_enabled = cli.skylight_shadow || cli.render_volumetric_fog;
 
         // or from000.looking_at()
         light_trans.rotation = Quat::from_rotation_z(sun_angle) * Quat::from_rotation_y(PI / 2.3);
+    }
+}
+
+fn ensure_volumetric_atmosphere(
+    mut cmds: Commands,
+    cli: Res<ClientInfo>,
+    query_cam: Query<
+        (Entity, Option<&VolumetricFog>, Option<&DistanceFog>),
+        Or<(With<CharacterControllerCamera>, With<EditorViewportCamera>)>,
+    >,
+    query_sun: Query<(Entity, Option<&VolumetricLight>), With<Sun>>,
+) {
+    match query_sun.single() {
+        Ok((sun_entity, vol_light)) => {
+            // Self-heal missing volumetric-light component on existing sun.
+            if vol_light.is_none() {
+                cmds.entity(sun_entity).insert(VolumetricLight);
+            }
+        }
+        Err(_) => {
+            // Self-heal missing sun/light entity; without VolumetricLight fog scattering disappears.
+            cmds.spawn((
+                DirectionalLight {
+                    shadows_enabled: true,
+                    illuminance: 40_000.0,
+                    ..default()
+                },
+                VolumetricLight,
+                Sun,
+                Name::new("Sun"),
+                DespawnOnWorldUnload,
+            ));
+        }
+    }
+
+    if !cli.render_volumetric_fog {
+        return;
+    }
+
+    for (cam_entity, has_vol_fog, has_distance_fog) in query_cam.iter() {
+        if has_distance_fog.is_none() {
+            let fog_density = if cli.volumetric_fog_density.is_finite() {
+                cli.volumetric_fog_density.clamp(0.0, 3.0)
+            } else {
+                0.0
+            };
+            let force_dense_fallback = cli.render_volumetric_fog && fog_density >= 1.5;
+
+            let mut visibility = if cli.sky_fog_visibility.is_finite() {
+                cli.sky_fog_visibility.max(0.001)
+            } else {
+                1200.0
+            };
+            if force_dense_fallback {
+                visibility = visibility.min((220.0 / (fog_density + 0.1)).max(24.0));
+            }
+            let falloff = if cli.sky_fog_is_atomspheric && !force_dense_fallback {
+                FogFalloff::from_visibility_colors(visibility, cli.sky_extinction_color, cli.sky_inscattering_color)
+            } else {
+                FogFalloff::from_visibility_squared(visibility / 1.4)
+            };
+            cmds.entity(cam_entity).insert(DistanceFog {
+                color: cli.sky_fog_color,
+                falloff,
+                ..default()
+            });
+        }
+
+        if has_vol_fog.is_none() {
+            cmds.entity(cam_entity).insert(VolumetricFog {
+                ambient_color: Color::linear_rgb(
+                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                ),
+                ambient_intensity: volumetric_fog_intensity_from_density(cli.volumetric_fog_density),
+                ..default()
+            });
+        }
     }
 }

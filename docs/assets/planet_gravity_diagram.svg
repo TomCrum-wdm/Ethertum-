@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+  <defs>
+    <style>
+      .node { fill: #bbf; stroke: #333; stroke-width:1.5 } 
+      .center { fill: #f9f; stroke: #333; stroke-width:1.5 }
+      .up { fill: #bfb; stroke: #333; stroke-width:1.5 }
+      .gravity { fill: #fbb; stroke: #333; stroke-width:1.5 }
+      .camera { fill: #ffd580; stroke: #333; stroke-width:1.5 }
+      .label { font-family: sans-serif; font-size: 14px; fill: #111 }
+      .small { font-size:12px }
+      .arrow { stroke: #333; stroke-width:1.6; marker-end: url(#arrowhead) }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+
+  <!-- Planet center and player -->
+  <g>
+    <circle cx="150" cy="210" r="36" class="center" />
+    <text x="150" y="210" text-anchor="middle" dominant-baseline="middle" class="label">星心</text>
+
+    <rect x="320" y="180" width="140" height="60" rx="6" class="node" />
+    <text x="390" y="210" text-anchor="middle" dominant-baseline="middle" class="label">玩家位置</text>
+  </g>
+
+  <!-- Direction vector -->
+  <line x1="186" y1="210" x2="320" y2="210" class="arrow" />
+  <text x="250" y="195" class="small">Dir = P - PC</text>
+
+  <!-- local_up box -->
+  <rect x="520" y="70" width="180" height="50" rx="6" class="up" />
+  <text x="610" y="100" text-anchor="middle" dominant-baseline="middle" class="label">local_up（归一化后的方向）</text>
+
+  <!-- arrows to local_up -->
+  <line x1="460" y1="210" x2="520" y2="95" class="arrow" />
+  <text x="490" y="165" class="small">normalize()</text>
+
+  <!-- gravity box -->
+  <rect x="520" y="150" width="180" height="50" rx="6" class="gravity" />
+  <text x="610" y="180" text-anchor="middle" dominant-baseline="middle" class="label">Gravity = -local_up * g</text>
+
+  <line x1="610" y1="120" x2="610" y2="150" class="arrow" />
+
+  <!-- camera and smoothing -->
+  <rect x="520" y="240" width="200" height="50" rx="6" class="camera" />
+  <text x="620" y="270" text-anchor="middle" dominant-baseline="middle" class="label">相机 up（平滑处理）</text>
+  <line x1="460" y1="210" x2="520" y2="265" class="arrow" />
+  <text x="490" y="235" class="small">lerp / 平滑</text>
+
+  <!-- jump -->
+  <rect x="730" y="150" width="140" height="50" rx="6" class="node" />
+  <text x="800" y="180" text-anchor="middle" dominant-baseline="middle" class="label">跳跃冲量（沿 local_up）</text>
+  <line x1="700" y1="175" x2="730" y2="175" class="arrow" />
+
+  <!-- legend -->
+  <g>
+    <text x="20" y="20" class="label">图示说明：local_up 从玩家指向星心的方向计算并归一化；重力沿 -local_up 方向。</text>
+  </g>
+
+</svg>

@@ -6,6 +6,7 @@
 #import bevy_pbr::prepass_io::VertexOutput
 #import bevy_pbr::prepass_io::FragmentOutput
 #import bevy_pbr::pbr_fragment
+#import bevy_pbr::pbr_types
 #import bevy_render::globals::Globals
 
 // // Parameters to the water shader.
@@ -61,6 +62,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // var uv = in.uv;
     var uv = in.world_position.xz / 100.0;
     pbr_input.N = sample_noise(uv, globals.time);
+    pbr_input.material.flags |= pbr_types::STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     // Send the rest to the deferred shader.
     return bevy_pbr::pbr_deferred_functions::deferred_output(in, pbr_input);
 }

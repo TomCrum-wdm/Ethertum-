@@ -2,6 +2,7 @@ use bevy::math::{IVec2, IVec3, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::voxel::{Chunk, Vox, VoxShape};
+use crate::voxel::WorldGenConfig;
 
 use super::EntityId;
 
@@ -29,6 +30,24 @@ pub struct NetItemStack {
 pub struct InventoryDeltaEntry {
     pub slot: u16,
     pub stack: NetItemStack,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum AdminRequest {
+    RequestState,
+    ToggleGod,
+    SetGod { enabled: bool },
+    ToggleNoclip,
+    SetNoclip { enabled: bool },
+    SaveWorld,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct AdminStateSnapshot {
+    pub is_owner: bool,
+    pub is_admin: bool,
+    pub god_enabled: bool,
+    pub noclip_enabled: bool,
 }
 
 impl CellData {
@@ -83,6 +102,8 @@ pub enum CPacket {
         b: u16,
     },
 
+    AdminRequest { request: AdminRequest },
+
     ChunkModify { chunkpos: IVec3, voxel: Vec<CellData> },
 
     LoadDistance { load_distance: IVec2 },
@@ -109,6 +130,17 @@ pub enum SPacket {
     LoginSuccess {
         // uuid, username
         player_entity: EntityId,
+        spawn_position: Vec3,
+    },
+
+    AdminState {
+        state: AdminStateSnapshot,
+    },
+
+    WorldInit {
+        world_name: String,
+        seed: u64,
+        world_config: WorldGenConfig,
     },
 
     // Play
@@ -120,6 +152,7 @@ pub enum SPacket {
         entity_id: EntityId,
         name: String, // temporary way.
                       // type: {Player}
+        position: Vec3,
     },
     EntityDel {
         entity_id: EntityId,

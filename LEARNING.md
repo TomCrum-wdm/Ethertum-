@@ -27,6 +27,7 @@ cargo build
   - 区块存储与序列化：[src/voxel/chunk_storage.rs](src/voxel/chunk_storage.rs#L1)
   - 世界生成：[src/voxel/worldgen.rs](src/voxel/worldgen.rs#L1)
   - 服务器加载/保存：[src/voxel/voxel_server.rs](src/voxel/voxel_server.rs#L1)
+   - 球世界引力（面向非程序员）：[docs/learning/planet_gravity_for_non_coders.md](docs/learning/planet_gravity_for_non_coders.md)
 # Ethertum 面向零基础的完整入门教材（教学版）
 
 欢迎！本教材把你当成“完全不懂编程、也不了解计算机基本概念”的初学者来编写。

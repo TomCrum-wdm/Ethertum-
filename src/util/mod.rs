@@ -92,7 +92,7 @@ pub fn hash3(v: IVec3) -> Vec3 {
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-pub fn hashcode<T: Hash>(t: &T) -> u64 {
+pub fn hashcode<T: Hash + ?Sized>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
@@ -208,9 +208,9 @@ pub fn generate_simple_user_name() -> String {
     let mut rng = rand::thread_rng();
     format!(
         "{}{}{}",
-        ADJS[rng.gen_range(0..ADJS.len())],
-        NOUNS[rng.gen_range(0..NOUNS.len())],
-        rng.gen_range(5..9999)
+        ADJS[rng.random_range(0..ADJS.len())],
+        NOUNS[rng.random_range(0..NOUNS.len())],
+        rng.random_range(5..9999)
     )
 }
 

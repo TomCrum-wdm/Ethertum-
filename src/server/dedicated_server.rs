@@ -5,7 +5,7 @@ use bevy::{
 use bevy_renet::renet::ClientId;
 
 use crate::{
-    net::{EntityId, NetItemStack, ServerNetworkPlugin},
+    net::{AdminStateSnapshot, EntityId, NetItemStack, ServerNetworkPlugin},
     voxel::ServerVoxelPlugin,
 };
 
@@ -146,10 +146,12 @@ pub mod rcon {
 }
 
 #[derive(Resource, serde::Deserialize, serde::Serialize, Asset, TypePath, Clone)]
+#[serde(default)]
 pub struct ServerSettings {
     pub port: u16,
     pub num_player_limit: u32,
     pub motd: String,
+    pub local_mode: bool,
 }
 
 impl Default for ServerSettings {
@@ -158,6 +160,7 @@ impl Default for ServerSettings {
             port: 4060,
             num_player_limit: 80,
             motd: "An Ethertum Server".into(),
+            local_mode: false,
         }
     }
 }
@@ -173,10 +176,16 @@ pub struct PlayerInfo {
     pub username: String,
     pub user_id: u64,
 
+    pub is_owner: bool,
+    pub is_admin: bool,
+    pub god_enabled: bool,
+    pub noclip_enabled: bool,
+
     pub client_id: ClientId, // network client id. renet
 
     pub entity_id: EntityId,
     pub position: Vec3,
+    pub last_valid_chunkpos: IVec3,
     pub ping_rtt: u32,
 
     pub chunks_load_distance: IVec2,
@@ -187,6 +196,12 @@ pub struct PlayerInfo {
 }
 
 impl PlayerInfo {
-    // fn update(&self) {
-    // }
+    pub fn admin_snapshot(&self) -> AdminStateSnapshot {
+        AdminStateSnapshot {
+            is_owner: self.is_owner,
+            is_admin: self.is_admin,
+            god_enabled: self.god_enabled,
+            noclip_enabled: self.noclip_enabled,
+        }
+    }
 }

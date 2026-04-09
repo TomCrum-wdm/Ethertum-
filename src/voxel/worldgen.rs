@@ -1,34 +1,218 @@
 use std::ops::Div;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use bevy::{math::ivec3, prelude::*};
+use bevy::{math::{ivec3, DVec2, DVec3}, prelude::*};
 use noise::{Fbm, NoiseFn, Perlin};
 
 
 use super::*;
 use crate::util::{hash, iter};
-use crate::client::settings::{ClientSettings, TerrainMode};
-
 // use crate::client::settings::ClientSettings;
 
-pub fn generate_chunk(chunk: &mut Chunk, settings: &ClientSettings) {
-    generate_chunk_with_seed(chunk, settings, 100);
+static GPU_WORLDGEN_FALLBACK_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+pub fn gpu_worldgen_fallback_total() -> u64 {
+    GPU_WORLDGEN_FALLBACK_TOTAL.load(Ordering::Relaxed)
 }
 
-pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, seed: u32) {
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn fold_seed_u32(seed: u64) -> u32 {
+    let mixed = splitmix64(seed ^ 0xA5A5_5A5A_DEAD_BEEFu64);
+    ((mixed >> 32) as u32) ^ (mixed as u32)
+}
+
+fn seed_offsets(seed: u64) -> (DVec2, DVec3) {
+    let s0 = splitmix64(seed ^ 0x4D59_5DF4_D0F3_3173);
+    let s1 = splitmix64(seed ^ 0xD2B7_4407_B1CE_6E93);
+    let s2 = splitmix64(seed ^ 0xCA5A_8263_9512_1157);
+    let s3 = splitmix64(seed ^ 0x8FCA_2B6C_83B7_11AB);
+    let to_unit = |v: u64| ((v as f64) / (u64::MAX as f64)) * 2.0 - 1.0;
+    let ofs2 = DVec2::new(to_unit(s0), to_unit(s1)) * 4096.0;
+    let ofs3 = DVec3::new(to_unit(s1), to_unit(s2), to_unit(s3)) * 4096.0;
+    (ofs2, ofs3)
+}
+
+pub fn generate_chunk(chunk: &mut Chunk, config: &WorldGenConfig, seed: u64) {
+    generate_chunk_with_seed(chunk, config, seed);
+}
+
+pub fn generate_chunks_gpu_batched(chunk_positions: &[IVec3], config: &WorldGenConfig, seed: u64) -> Vec<Chunk> {
+    match super::worldgen_gpu::generate_chunks_gpu_batched(chunk_positions, config, seed) {
+        Ok(chunks) => {
+            let mut non_nil_voxels = 0usize;
+            let total_voxels = chunks.len() * Chunk::LEN3;
+            for chunk in &chunks {
+                chunk.for_voxels(|v, _| {
+                    if !v.is_nil() {
+                        non_nil_voxels += 1;
+                    }
+                });
+            }
+
+            // Compatibility guard: only fallback when output is fully empty.
+            if non_nil_voxels == 0 {
+                warn!(
+                    "GPU worldgen produced empty output ({non_nil_voxels}/{total_voxels}), falling back to CPU fast kernel"
+                );
+                let mut out = Vec::with_capacity(chunk_positions.len());
+                for &chunkpos in chunk_positions {
+                    let mut chunk = Chunk::new(chunkpos);
+                    generate_chunk_fast_kernel(&mut chunk, config, seed);
+                    out.push(chunk);
+                }
+                out
+            } else {
+                chunks
+            }
+        }
+        Err(err) => {
+            warn!("GPU worldgen failed, falling back to CPU fast kernel: {err}");
+            GPU_WORLDGEN_FALLBACK_TOTAL.fetch_add(1, Ordering::Relaxed);
+            let mut out = Vec::with_capacity(chunk_positions.len());
+            for &chunkpos in chunk_positions {
+                let mut chunk = Chunk::new(chunkpos);
+                generate_chunk_fast_kernel(&mut chunk, config, seed);
+                out.push(chunk);
+            }
+            out
+        }
+    }
+}
+
+pub fn generate_chunk_fast_kernel(chunk: &mut Chunk, config: &WorldGenConfig, seed: u64) {
+    let mut config = config.clone();
+    config.sanitize();
+
+    let mut fbm = Fbm::<Perlin>::new(fold_seed_u32(seed));
+    fbm.octaves = config.fbm_octaves as usize;
+    let (seed_ofs2, seed_ofs3) = seed_offsets(seed);
+
+    let terrain_mode = config.terrain_mode;
+    let planet_center = config.planet_center;
+    let planet_radius = config.planet_radius;
+    let shell_thickness = config.planet_shell_thickness.max(1.0);
+    let noise_scale_2d = config.noise_scale_2d.max(1.0);
+    let noise_scale_3d = config.noise_scale_3d.max(1.0);
+
+    let mut terr_2d = [[0.0_f32; Chunk::LEN as usize]; Chunk::LEN as usize];
+    for lz in 0..Chunk::LEN {
+        for lx in 0..Chunk::LEN {
+            let p = chunk.chunkpos + IVec3::new(lx, 0, lz);
+            let f = match terrain_mode {
+                WorldTerrainMode::Planet => {
+                    let safe = p.as_vec3().clamp(Vec3::splat(-100_000.0), Vec3::splat(100_000.0));
+                    let mut sample = (safe / noise_scale_2d).xz().as_dvec2();
+                    sample += seed_ofs2;
+                    fbm.get(sample.to_array()) as f32
+                }
+                WorldTerrainMode::Flat => {
+                    let mut sample = p.xz().as_dvec2().div(noise_scale_2d as f64);
+                    sample += seed_ofs2;
+                    fbm.get(sample.to_array()) as f32
+                }
+                WorldTerrainMode::SuperFlat => 0.0,
+            };
+            terr_2d[lz as usize][lx as usize] = f;
+        }
+    }
+
+    for ly in 0..Chunk::LEN {
+        for lz in 0..Chunk::LEN {
+            for lx in 0..Chunk::LEN {
+                let lp = IVec3::new(lx, ly, lz);
+                let p = chunk.chunkpos + lp;
+
+                let f_terr = terr_2d[lz as usize][lx as usize];
+                let f_3d = match terrain_mode {
+                    WorldTerrainMode::Planet => {
+                        let safe = p.as_vec3().clamp(Vec3::splat(-100_000.0), Vec3::splat(100_000.0));
+                        fbm.get((safe / noise_scale_3d).to_array().map(|v| v as f64)) as f32
+                    }
+                    WorldTerrainMode::Flat => {
+                        let mut sample = p.as_dvec3().div(noise_scale_3d as f64);
+                        sample += seed_ofs3;
+                        fbm.get(sample.to_array()) as f32
+                    }
+                    WorldTerrainMode::SuperFlat => 0.0,
+                };
+
+                let (val, tex) = match terrain_mode {
+                    WorldTerrainMode::Planet => {
+                        let d = (p.as_vec3() - planet_center.as_vec3()).length();
+                        let mut val =
+                            f_terr - ((d - planet_radius) / shell_thickness) + f_3d * config.planet_3d_noise_strength;
+                        if !val.is_finite() {
+                            val = -1.0;
+                        }
+                        let mut tex = VoxTex::Nil;
+                        if val > 0.0 {
+                            tex = VoxTex::Stone;
+                        } else if config.planet_inner_water && d < planet_radius && val < 0.0 {
+                            val = -0.1;
+                            tex = VoxTex::Water;
+                        }
+                        (val, tex)
+                    }
+                    WorldTerrainMode::Flat => {
+                        let mut val =
+                            f_terr - (p.y as f32) / config.flat_height_divisor + f_3d * config.flat_3d_noise_strength;
+                        let mut tex = VoxTex::Nil;
+                        if val > 0.0 {
+                            tex = VoxTex::Stone;
+                        } else if p.y < config.flat_water_level && val < 0.0 {
+                            val = -0.1;
+                            tex = VoxTex::Water;
+                        }
+                        (val, tex)
+                    }
+                    WorldTerrainMode::SuperFlat => {
+                        let stone_top = config.superflat_ground_level - config.superflat_dirt_depth;
+                        if p.y < stone_top {
+                            (1.0, VoxTex::Stone)
+                        } else if p.y < config.superflat_ground_level {
+                            (1.0, VoxTex::Dirt)
+                        } else if p.y == config.superflat_ground_level {
+                            (1.0, VoxTex::Grass)
+                        } else if p.y <= config.superflat_water_level {
+                            (-0.1, VoxTex::Water)
+                        } else {
+                            (-1.0, VoxTex::Nil)
+                        }
+                    }
+                };
+
+                *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
+            }
+        }
+    }
+}
+
+pub fn generate_chunk_with_seed(chunk: &mut Chunk, config: &WorldGenConfig, seed: u64) {
+    let mut config = config.clone();
+    config.sanitize();
+
     // let perlin = Perlin::new(seed);
-    let mut fbm = Fbm::<Perlin>::new(seed);
+    let mut fbm = Fbm::<Perlin>::new(fold_seed_u32(seed));
+    let (seed_ofs2, seed_ofs3) = seed_offsets(seed);
     // fbm.frequency = 0.2;
     // fbm.lacunarity = 0.2;
-    fbm.octaves = 5;
+    fbm.octaves = config.fbm_octaves as usize;
     // fbm.persistence = 2;
 
-    // 直接安全获取地形模式
-    let terrain_mode = settings.terrain_mode;
+    let terrain_mode = config.terrain_mode;
 
-    // 将球心提升到y=512，壳厚度加大，地形更厚实
-    let planet_center = IVec3::new(0, 512, 0);
-    let planet_radius: f32 = 512.0;
-    let shell_thickness: f32 = 96.0;
+    let planet_center = config.planet_center;
+    let planet_radius = config.planet_radius;
+    let shell_thickness = config.planet_shell_thickness.max(1.0);
+    let noise_scale_2d = config.noise_scale_2d.max(1.0);
+    let noise_scale_3d = config.noise_scale_3d.max(1.0);
 
     for ly in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
@@ -37,41 +221,55 @@ pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, se
                 let p = chunk.chunkpos + lp;
 
                 let (val, mut tex) = match terrain_mode {
-                    TerrainMode::Planet => {
+                    WorldTerrainMode::Planet => {
                         let d = (p.as_vec3() - planet_center.as_vec3()).length();
                         // clamp采样参数，防止极大坐标导致NaN/inf
                         let safe_vec3 = p.as_vec3().clamp(
                             Vec3::splat(-100_000.0),
                             Vec3::splat(100_000.0),
                         );
-                        let arr2 = (safe_vec3 / 130.0).xz().to_array().map(|v| v as f64);
-                        let arr3 = (safe_vec3 / 90.0).to_array().map(|v| v as f64);
+                        let arr2 = ((safe_vec3 / noise_scale_2d).xz().as_dvec2() + seed_ofs2).to_array();
+                        let arr3 = ((safe_vec3 / noise_scale_3d).as_dvec3() + seed_ofs3).to_array();
                         let f_terr = fbm.get(arr2) as f32;
                         let f_3d = fbm.get(arr3) as f32;
-                        let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * 1.2;
+                        let mut val = f_terr - ((d - planet_radius) / shell_thickness) + f_3d * config.planet_3d_noise_strength;
                         // 检查val非法
                         if !val.is_finite() { val = -1.0; }
                         let mut tex = VoxTex::Nil;
                         if val > 0.0 {
                             tex = VoxTex::Stone;
-                        } else if d < planet_radius && val < 0.0 {
+                        } else if config.planet_inner_water && d < planet_radius && val < 0.0 {
                             val = -0.1;
                             tex = VoxTex::Water;
                         }
                         (val, tex)
                     }
-                    TerrainMode::Flat => {
-                        let f_terr = fbm.get(p.xz().as_dvec2().div(130.).to_array()) as f32;
-                        let f_3d = fbm.get(p.as_dvec3().div(90.).to_array()) as f32;
-                        let mut val = f_terr - (p.y as f32) / 18. + f_3d * 4.5;
+                    WorldTerrainMode::Flat => {
+                        let f_terr = fbm.get((p.xz().as_dvec2().div(noise_scale_2d as f64) + seed_ofs2).to_array()) as f32;
+                        let f_3d = fbm.get((p.as_dvec3().div(noise_scale_3d as f64) + seed_ofs3).to_array()) as f32;
+                        let mut val = f_terr - (p.y as f32) / config.flat_height_divisor + f_3d * config.flat_3d_noise_strength;
                         let mut tex = VoxTex::Nil;
                         if val > 0.0 {
                             tex = VoxTex::Stone;
-                        } else if p.y < 0 && val < 0. {
+                        } else if p.y < config.flat_water_level && val < 0. {
                             val = -0.1;
                             tex = VoxTex::Water;
                         }
                         (val, tex)
+                    }
+                    WorldTerrainMode::SuperFlat => {
+                        let stone_top = config.superflat_ground_level - config.superflat_dirt_depth;
+                        if p.y < stone_top {
+                            (1.0, VoxTex::Stone)
+                        } else if p.y < config.superflat_ground_level {
+                            (1.0, VoxTex::Dirt)
+                        } else if p.y == config.superflat_ground_level {
+                            (1.0, VoxTex::Grass)
+                        } else if p.y <= config.superflat_water_level {
+                            (-0.1, VoxTex::Water)
+                        } else {
+                            (-1.0, VoxTex::Nil)
+                        }
                     }
                 };
                 *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
@@ -80,7 +278,7 @@ pub fn generate_chunk_with_seed(chunk: &mut Chunk, settings: &ClientSettings, se
     }
 }
 
-pub fn populate_chunk(chunk: &mut Chunk) {
+pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
     let chunkpos = chunk.chunkpos;
     let perlin = Perlin::new(123);
 
@@ -174,8 +372,13 @@ pub fn populate_chunk(chunk: &mut Chunk) {
                 }
             }
 
+            let allow_trees = match config.terrain_mode {
+                WorldTerrainMode::SuperFlat => config.superflat_generate_trees,
+                _ => true,
+            };
+
             // Trees
-            if hash(x ^ (z * 9572)) < (3.0 / 256.0) {
+            if allow_trees && hash(x ^ (z * 9572)) < (3.0 / 256.0) {
                 for ly in 0..Chunk::LEN {
                     let lp = ivec3(lx, ly, lz);
 

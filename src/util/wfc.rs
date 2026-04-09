@@ -84,7 +84,8 @@ impl Tile {
         // while self.possib.len() > 1 {
         //     self.possib.pop();
         // }
-        let tmp = self.possib[rand::thread_rng().gen_range(0..self.possib.len())];
+        let mut rng = rand::thread_rng();
+        let tmp = self.possib[rng.random_range(0..self.possib.len())];
         self.possib.clear();
         self.possib.push(tmp);
     }

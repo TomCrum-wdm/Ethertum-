@@ -7,12 +7,16 @@ use bevy_egui::{
     EguiContexts,
 };
 use bevy_renet::renet::RenetClient;
+use avian3d::prelude::Position;
+use leafwing_input_manager::action_state::ActionState;
+
+use crate::client::prelude::{CharacterController, CharacterControllerCamera, WorldInfo};
 
 use crate::ui::prelude::*;
 use crate::{
     client::{
         game_client::ClientInfo,
-        input::{TouchButtonState, TouchStickState},
+        input::{InputAction, TouchButtonState, TouchStickState},
         settings::{ClientSettings, TouchActionBinding},
         ui::CurrentUI,
     },
@@ -20,6 +24,7 @@ use crate::{
 };
 
 use super::{new_egui_window, settings::ui_setting_line};
+use super::items::{draw_place_voxel, item_sort_key, placeable_voxel_defs, InventoryOperation};
 
 // todo: Res是什么原理？每次sys调用会deep拷贝吗？还是传递指针？如果deep clone这么多消息记录 估计会很浪费性能。
 
@@ -40,6 +45,59 @@ fn set_cursor_pos(ctx: &egui::Context, id: egui::Id, pos: usize) {
         state.cursor.set_char_range(Some(CCursorRange::one(egui::text::CCursor::new(pos))));
         // state.set_ccursor_range(Some(CCursorRange::one(egui::text::CCursor::new(pos))));
         state.store(ctx, id);
+    }
+}
+
+fn safe_unit_vec3_hud(v: Vec3, fallback: Vec3) -> Vec3 {
+    let n = v.normalize_or_zero();
+    if n.length_squared() <= 1e-6 || !n.is_finite() {
+        fallback
+    } else {
+        n
+    }
+}
+
+fn hud_operation_color(op: InventoryOperation) -> Color32 {
+    match op {
+        InventoryOperation::Place => Color32::from_rgb(90, 210, 150),
+        InventoryOperation::Mine => Color32::from_rgb(255, 155, 110),
+        InventoryOperation::Weapon => Color32::from_rgb(255, 110, 120),
+        InventoryOperation::Food => Color32::from_rgb(255, 205, 110),
+        InventoryOperation::Inspect => Color32::from_rgb(150, 190, 255),
+    }
+}
+
+fn hud_item_matches_operation(op: InventoryOperation, item_name: &str) -> bool {
+    let name = item_name.to_ascii_lowercase();
+    match op {
+        InventoryOperation::Place => false,
+        InventoryOperation::Mine => {
+            name.contains("pickaxe")
+                || name.contains("shovel")
+                || name.contains("axe")
+                || name.contains("shear")
+                || name.contains("drill")
+                || name.contains("tool")
+        }
+        InventoryOperation::Weapon => {
+            name.contains("sword")
+                || name.contains("bow")
+                || name.contains("gun")
+                || name.contains("spear")
+                || name.contains("axe")
+                || name.contains("pickaxe")
+                || name.contains("grapple")
+        }
+        InventoryOperation::Food => {
+            name.contains("apple")
+                || name.contains("avocado")
+                || name.contains("bread")
+                || name.contains("meat")
+                || name.contains("fish")
+                || name.contains("berry")
+                || name.contains("food")
+        }
+        InventoryOperation::Inspect => true,
     }
 }
 
@@ -266,9 +324,93 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
             }
 
             ui.horizontal(|ui| {
-                for i in 0..ClientPlayerInfo::HOTBAR_SLOTS {
-                    if let Some(item) = player.inventory.items.get_mut(i as usize) {
-                        ui_item_stack(ui, item, i as usize, &items, &mut inv_ui_state);
+                let operation_slots = [
+                    InventoryOperation::Place,
+                    InventoryOperation::Mine,
+                    InventoryOperation::Weapon,
+                    InventoryOperation::Food,
+                    InventoryOperation::Inspect,
+                ];
+
+                for op in operation_slots {
+                    let active = inv_ui_state.active_operation == op;
+                    let tint = hud_operation_color(op);
+                    let resp = sfx_play(ui.add_sized(
+                        [50.0, 50.0],
+                        egui::Button::new(op.label())
+                            .fill(if active {
+                                Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 120)
+                            } else {
+                                Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 46)
+                            })
+                            .stroke(egui::Stroke::new(2.0, tint)),
+                    ));
+                    if resp.clicked() {
+                        inv_ui_state.active_operation = op;
+                        inv_ui_state.operation_filters = vec![op];
+                    }
+                }
+
+                ui.separator();
+
+                let visible_item_slots = 6usize;
+                if inv_ui_state.active_operation == InventoryOperation::Place {
+                    let mut place_defs = placeable_voxel_defs().to_vec();
+                    let current_tex = voxbrush.tex;
+                    place_defs.sort_by_key(|def| if def.tex == current_tex { 0 } else { 1 });
+
+                    for i in 0..visible_item_slots {
+                        if let Some(def) = place_defs.get(i).copied() {
+                            let active = voxbrush.tex == def.tex;
+                            let tint = hud_operation_color(InventoryOperation::Place);
+                            let mut resp = sfx_play(ui.add_sized(
+                                [50.0, 50.0],
+                                egui::Button::new("")
+                                    .fill(if active {
+                                        Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 120)
+                                    } else {
+                                        Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 46)
+                                    })
+                                    .stroke(egui::Stroke::new(2.0, tint)),
+                            ));
+                            resp = resp.on_hover_text(format!("{} [tex:{}]", def.name, def.tex));
+                            draw_place_voxel(&def, resp.rect, ui.painter(), &items);
+
+                            if resp.clicked() {
+                                voxbrush.tex = def.tex;
+                                voxbrush.shape = def.shape;
+                            }
+                        } else {
+                            ui.add_sized([50.0, 50.0], egui::Button::new(""));
+                        }
+                    }
+                } else {
+                    let mut filtered_indices = Vec::new();
+                    for (idx, stack) in player.inventory.items.iter().enumerate() {
+                        if stack.is_empty() {
+                            continue;
+                        }
+                        let Some(name) = items.reg.at((stack.item_id - 1) as u16) else {
+                            continue;
+                        };
+                        if hud_item_matches_operation(inv_ui_state.active_operation, name) {
+                            filtered_indices.push(idx);
+                        }
+                    }
+
+                    filtered_indices.sort_by_key(|slot_idx| {
+                        let stack = &player.inventory.items[*slot_idx];
+                        item_sort_key(&items, stack.item_id)
+                    });
+
+                    for i in 0..visible_item_slots {
+                        if let Some(slot_idx) = filtered_indices.get(i).copied() {
+                            if let Some(item) = player.inventory.items.get_mut(slot_idx) {
+                                ui_item_stack(ui, item, slot_idx, &items, &mut inv_ui_state);
+                            }
+                        } else {
+                            ui.add_sized([50.0, 50.0], egui::Button::new(""));
+                        }
                     }
                 }
             });
@@ -321,19 +463,127 @@ pub fn hud_playerlist(
         });
 }
 
+pub fn hud_attitude_indicators(
+    mut ctx: EguiContexts,
+    cfg: Res<ClientSettings>,
+    worldinfo: Res<WorldInfo>,
+    query_cam: Query<&Transform, With<CharacterControllerCamera>>,
+    query_char: Query<&Position, (With<CharacterController>, Without<CharacterControllerCamera>)>,
+) {
+    if !cfg.show_level_indicator && !cfg.show_pitch_indicator {
+        return;
+    }
+
+    let Ok(ctx_mut) = ctx.ctx_mut() else {
+        return;
+    };
+    let Ok(cam_trans) = query_cam.single() else {
+        return;
+    };
+    let Some(char_pos) = query_char.iter().next() else {
+        return;
+    };
+
+    let local_up = safe_unit_vec3_hud(worldinfo.world_config.world_up_at(char_pos.0), Vec3::Y);
+    let look_dir = safe_unit_vec3_hud(cam_trans.rotation * -Vec3::Z, -Vec3::Z);
+    let cam_up = safe_unit_vec3_hud(cam_trans.rotation * Vec3::Y, Vec3::Y);
+    let projected_world_up = safe_unit_vec3_hud(local_up - look_dir * local_up.dot(look_dir), cam_up);
+
+    let sin_roll = look_dir.dot(cam_up.cross(projected_world_up));
+    let cos_roll = cam_up.dot(projected_world_up).clamp(-1.0, 1.0);
+    let roll_rad = sin_roll.atan2(cos_roll);
+    let roll_deg = roll_rad.to_degrees();
+    let pitch_deg = look_dir.dot(local_up).clamp(-1.0, 1.0).asin().to_degrees();
+
+    egui::Window::new("Attitude Indicators")
+        .title_bar(false)
+        .resizable(false)
+        .collapsible(false)
+        .movable(false)
+        .anchor(Align2::RIGHT_TOP, [-14.0, cfg.hud_padding + 14.0])
+        .frame(
+            Frame::default()
+                .fill(Color32::from_rgba_premultiplied(8, 12, 18, 180))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(120, 180, 220, 180)))
+                .corner_radius(6.0),
+        )
+        .show(ctx_mut, |ui| {
+            ui.set_min_width(236.0);
+
+            if cfg.show_level_indicator {
+                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("Level: {:+.1}°", roll_deg));
+
+                let size = egui::vec2(220.0, 112.0);
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                let painter = ui.painter_at(rect);
+                let center = rect.center();
+                let radius = (rect.width().min(rect.height()) * 0.46).max(1.0);
+
+                painter.circle_stroke(
+                    center,
+                    radius,
+                    egui::Stroke::new(1.5, Color32::from_rgba_premultiplied(180, 220, 255, 210)),
+                );
+
+                let pitch_offset = (-pitch_deg / 45.0).clamp(-1.2, 1.2) * radius * 0.6;
+                let horizon_dir = egui::vec2(roll_rad.cos(), roll_rad.sin());
+                let center_shifted = center + egui::vec2(0.0, pitch_offset);
+                let p1 = center_shifted - horizon_dir * radius * 1.2;
+                let p2 = center_shifted + horizon_dir * radius * 1.2;
+
+                painter.line_segment([p1, p2], egui::Stroke::new(2.0, Color32::from_rgb(120, 210, 255)));
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x - 9.0, center.y),
+                        egui::pos2(center.x + 9.0, center.y),
+                    ],
+                    egui::Stroke::new(2.0, Color32::from_rgb(255, 230, 130)),
+                );
+                painter.line_segment(
+                    [
+                        egui::pos2(center.x, center.y - 7.0),
+                        egui::pos2(center.x, center.y + 7.0),
+                    ],
+                    egui::Stroke::new(2.0, Color32::from_rgb(255, 230, 130)),
+                );
+
+                ui.add_space(4.0);
+            }
+
+            if cfg.show_pitch_indicator {
+                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("Pitch: {:+.1}°", pitch_deg));
+                let pitch_norm = ((pitch_deg + 90.0) / 180.0).clamp(0.0, 1.0);
+                ui.add(
+                    egui::ProgressBar::new(pitch_norm)
+                        .desired_width(220.0)
+                        .text(format!("{:+.1}°", pitch_deg)),
+                );
+            }
+        });
+}
+
 pub fn hud_touch_sticks(
     mut ctx: EguiContexts,
     mut cfg: ResMut<ClientSettings>,
     cli: Res<ClientInfo>,
-    sticks: Res<TouchStickState>,
+    time: Res<Time>,
+    mut sticks: ResMut<TouchStickState>,
     mut buttons: ResMut<TouchButtonState>,
+    mut inv_ui_state: ResMut<super::items::InventoryUiState>,
+    query_action: Query<&ActionState<InputAction>>,
+    mut query_controller: Query<&mut CharacterController>,
     asset_server: Res<AssetServer>,
     mut texture_ids: Local<(Option<egui::TextureId>, Option<egui::TextureId>)>,
     mut texture_handles: Local<(Handle<Image>, Handle<Image>)>,
     mut drag_in_progress: Local<bool>,
+    mut last_up_tap_time: Local<f32>,
+    mut up_hold_prev: Local<bool>,
 ) {
+    let Ok(action_state) = query_action.single() else {
+        return;
+    };
     let show_for_edit = cli.touch_controls_edit_mode && cli.curr_ui == CurrentUI::Settings;
-    let show_runtime = cfg.touch_ui && cli.curr_ui == CurrentUI::None && !cli.touch_controls_edit_mode && cfg!(target_os = "android");
+    let show_runtime = cfg.touch_ui && cli.curr_ui == CurrentUI::None && !cli.touch_controls_edit_mode;
     if !cfg.touch_ui || !(show_runtime || show_for_edit) {
         buttons.attack_pressed = false;
         buttons.attack_just_pressed = false;
@@ -345,6 +595,8 @@ pub fn hud_touch_sticks(
         buttons.sprint_just_pressed = false;
         buttons.crouch_pressed = false;
         buttons.crouch_just_pressed = false;
+        buttons.vertical_axis = 0.0;
+        buttons.vertical_active = false;
         return;
     }
 
@@ -405,6 +657,24 @@ pub fn hud_touch_sticks(
     buttons.jump_pressed = false;
     buttons.sprint_pressed = false;
     buttons.crouch_pressed = false;
+    buttons.vertical_axis = 0.0;
+    buttons.vertical_active = false;
+
+    let is_flying = query_controller
+        .iter()
+        .next()
+        .is_some_and(|c| c.is_flying || c.noclip_enabled);
+    let sprint_visual_active = action_state.pressed(&InputAction::Sprint) || sticks.sprint_locked;
+
+    let action_pressed = |binding: TouchActionBinding| -> bool {
+        match binding {
+            TouchActionBinding::Attack => action_state.pressed(&InputAction::Attack),
+            TouchActionBinding::UseItem => action_state.pressed(&InputAction::UseItem),
+            TouchActionBinding::Jump => action_state.pressed(&InputAction::Jump),
+            TouchActionBinding::Sprint => action_state.pressed(&InputAction::Sprint),
+            TouchActionBinding::Sneak => action_state.pressed(&InputAction::Sneak),
+        }
+    };
 
     let painter = ctx_mut.layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::new("touch_controls_overlay")));
 
@@ -461,20 +731,11 @@ pub fn hud_touch_sticks(
     }
 
     let button_radius = touch_cfg.button_radius.clamp(30.0, 80.0);
-    let action_visual = |binding: TouchActionBinding| -> (&'static str, Color32) {
-        match binding {
-            TouchActionBinding::Attack => ("PICK", Color32::from_rgb(255, 140, 120)),
-            TouchActionBinding::UseItem => ("BLOCK", Color32::from_rgb(110, 220, 160)),
-            TouchActionBinding::Jump => ("UP", Color32::from_rgb(130, 200, 255)),
-            TouchActionBinding::Sprint => ("RUN", Color32::from_rgb(255, 210, 120)),
-            TouchActionBinding::Sneak => ("CROUCH", Color32::from_rgb(190, 180, 255)),
-        }
-    };
-    let mut draw_button = |id: &str, pos_uv: &mut [f32; 2], binding: TouchActionBinding| {
+    let mut draw_operation_selector = |id: &str, pos_uv: &mut [f32; 2], op: InventoryOperation, label: &'static str| {
         let pos = to_pos(*pos_uv);
-        let (label, tint) = action_visual(binding);
+        let tint = hud_operation_color(op);
 
-        egui::Area::new(Id::new(format!("touch_btn_{id}")))
+        egui::Area::new(Id::new(format!("touch_op_btn_{id}")))
             .fixed_pos(egui::pos2(pos.x - button_radius, pos.y - button_radius))
             .interactable(true)
             .show(ctx_mut, |ui| {
@@ -482,9 +743,11 @@ pub fn hud_touch_sticks(
                     egui::vec2(button_radius * 2.0, button_radius * 2.0),
                     egui::Sense::click_and_drag(),
                 );
+                let resp = sfx_play(resp);
                 let p = rect.center();
 
-                let pressed = resp.hovered() && ui.input(|i| i.pointer.primary_down()) && !cli.touch_controls_edit_mode;
+                let touch_pressed = resp.hovered() && ui.input(|i| i.pointer.primary_down()) && !cli.touch_controls_edit_mode;
+                let visual_pressed = touch_pressed || inv_ui_state.active_operation == op;
 
                 if cli.touch_controls_edit_mode && resp.dragged() {
                     if let Some(pointer_pos) = resp.interact_pointer_pos() {
@@ -496,7 +759,7 @@ pub fn hud_touch_sticks(
                     }
                 }
 
-                let fill = if pressed {
+                let fill = if visual_pressed {
                     Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 110)
                 } else {
                     Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 42)
@@ -509,26 +772,301 @@ pub fn hud_touch_sticks(
 
                 ui.painter().circle_filled(p, button_radius, fill);
                 ui.painter().circle_stroke(p, button_radius, stroke);
-                ui.painter().text(p, egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(16.0), Color32::WHITE);
+                let text_color = if visual_pressed {
+                    Color32::from_rgb(255, 250, 220)
+                } else {
+                    Color32::WHITE
+                };
+                let text_offset = if visual_pressed { 1.2 } else { 0.0 };
+                ui.painter().text(
+                    egui::pos2(p.x, p.y + text_offset),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(14.0),
+                    text_color,
+                );
 
-                if pressed {
-                    match binding {
-                        TouchActionBinding::Attack => buttons.attack_pressed = true,
-                        TouchActionBinding::UseItem => buttons.use_pressed = true,
-                        TouchActionBinding::Jump => buttons.jump_pressed = true,
-                        TouchActionBinding::Sprint => buttons.sprint_pressed = true,
-                        TouchActionBinding::Sneak => buttons.crouch_pressed = true,
-                    }
+                if resp.clicked() && !cli.touch_controls_edit_mode {
+                    inv_ui_state.active_operation = op;
+                    inv_ui_state.operation_filters = vec![op];
                 }
             });
     };
 
-    draw_button("attack", &mut touch_cfg.attack_button_pos, touch_cfg.attack_button_action);
-    draw_button("use", &mut touch_cfg.use_button_pos, touch_cfg.use_button_action);
-    draw_button("jump", &mut touch_cfg.jump_button_pos, touch_cfg.jump_button_action);
-    draw_button("sprint", &mut touch_cfg.sprint_button_pos, touch_cfg.sprint_button_action);
-    draw_button("crouch", &mut touch_cfg.crouch_button_pos, touch_cfg.crouch_button_action);
+    draw_operation_selector("pick_as_op", &mut touch_cfg.attack_button_pos, InventoryOperation::Mine, "MINE");
+    draw_operation_selector("use_as_op", &mut touch_cfg.use_button_pos, InventoryOperation::Place, "PLACE");
+    if is_flying {
+        let slider_center = to_pos(touch_cfg.vertical_slider_pos);
+        let slider_h = touch_cfg.vertical_slider_height.clamp(120.0, 320.0);
+        let slider_w = touch_cfg.vertical_slider_width.clamp(44.0, 96.0);
+        let slider_half_h = slider_h * 0.5;
+        let slider_rect = egui::Rect::from_center_size(
+            egui::pos2(slider_center.x, slider_center.y),
+            egui::vec2(slider_w, slider_h),
+        );
 
+        egui::Area::new(Id::new("touch_vertical_slider"))
+            .fixed_pos(slider_rect.min)
+            .interactable(true)
+            .show(ctx_mut, |ui| {
+                let (rect, resp) = ui.allocate_exact_size(slider_rect.size(), egui::Sense::click_and_drag());
+
+                if cli.touch_controls_edit_mode && resp.dragged() {
+                    if let Some(pointer_pos) = resp.interact_pointer_pos() {
+                        let new_pos = to_uv(bevy::math::Vec2::new(pointer_pos.x, pointer_pos.y));
+                        if touch_cfg.vertical_slider_pos != new_pos {
+                            touch_cfg.vertical_slider_pos = new_pos;
+                            layout_changed = true;
+                        }
+                    }
+                }
+
+                let runtime_dragging = !cli.touch_controls_edit_mode && resp.hovered() && ui.input(|i| i.pointer.primary_down());
+                let mut display_axis = if buttons.vertical_active {
+                    buttons.vertical_axis
+                } else {
+                    0.0
+                };
+                let keyboard_axis = match (action_pressed(TouchActionBinding::Jump), action_pressed(TouchActionBinding::Sneak)) {
+                    (true, false) => 1.0,
+                    (false, true) => -1.0,
+                    _ => 0.0,
+                };
+                if keyboard_axis != 0.0 {
+                    display_axis = keyboard_axis;
+                }
+                if runtime_dragging {
+                    if let Some(pointer_pos) = resp.interact_pointer_pos() {
+                        let axis = ((slider_center.y - pointer_pos.y) / slider_half_h).clamp(-1.0, 1.0);
+                        buttons.vertical_axis = axis;
+                        buttons.vertical_active = axis.abs() > 0.01;
+                        display_axis = axis;
+                    }
+                }
+
+                let p = ui.painter();
+                let track_fill = if cli.touch_controls_edit_mode {
+                    Color32::from_rgba_premultiplied(255, 220, 120, 52)
+                } else {
+                    Color32::from_rgba_premultiplied(120, 180, 255, 38)
+                };
+                let track_stroke = if cli.touch_controls_edit_mode {
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 220, 120, 220))
+                } else {
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(135, 215, 255, 220))
+                };
+                p.rect(
+                    rect,
+                    egui::CornerRadius::same((slider_w * 0.28) as u8),
+                    track_fill,
+                    track_stroke,
+                    egui::StrokeKind::Middle,
+                );
+
+                let mid_y = rect.center().y;
+                p.line_segment(
+                    [egui::pos2(rect.left() + 6.0, mid_y), egui::pos2(rect.right() - 6.0, mid_y)],
+                    egui::Stroke::new(1.5, Color32::from_rgba_premultiplied(240, 248, 255, 170)),
+                );
+
+                let thumb_y = slider_center.y - display_axis * slider_half_h;
+                let thumb_center = egui::pos2(rect.center().x, thumb_y.clamp(rect.top() + 14.0, rect.bottom() - 14.0));
+                p.circle_filled(thumb_center, slider_w * 0.28, Color32::from_rgba_premultiplied(140, 225, 255, 220));
+                p.circle_stroke(
+                    thumb_center,
+                    slider_w * 0.28,
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(220, 248, 255, 235)),
+                );
+
+                p.text(
+                    egui::pos2(rect.center().x, rect.top() - 12.0),
+                    egui::Align2::CENTER_CENTER,
+                    "FLY",
+                    egui::FontId::proportional(12.0),
+                    Color32::from_rgb(255, 230, 140),
+                );
+                p.text(
+                    egui::pos2(rect.center().x, rect.top() + 12.0),
+                    egui::Align2::CENTER_CENTER,
+                    "UP",
+                    egui::FontId::proportional(11.0),
+                    Color32::from_rgb(170, 230, 255),
+                );
+                p.text(
+                    egui::pos2(rect.center().x, rect.bottom() - 12.0),
+                    egui::Align2::CENTER_CENTER,
+                    "DOWN",
+                    egui::FontId::proportional(11.0),
+                    Color32::from_rgb(195, 180, 255),
+                );
+
+                let land_button_pos = egui::pos2(rect.center().x - 48.0, rect.bottom() + 16.0);
+                egui::Area::new(Id::new("touch_land_button"))
+                    .fixed_pos(land_button_pos)
+                    .show(ui.ctx(), |ui| {
+                        if sfx_play(ui.add_sized([96.0, 32.0], egui::Button::new("LAND"))).clicked() {
+                            if let Some(mut ctl) = query_controller.iter_mut().next() {
+                                ctl.is_flying = false;
+                                ctl.noclip_enabled = false;
+                            }
+                        }
+                    });
+            });
+    } else {
+        let slider_center = to_pos(touch_cfg.vertical_slider_pos);
+        let slider_h = touch_cfg.vertical_slider_height.clamp(120.0, 320.0);
+        let slider_w = touch_cfg.vertical_slider_width.clamp(44.0, 96.0);
+        let capsule_rect = egui::Rect::from_center_size(
+            egui::pos2(slider_center.x, slider_center.y),
+            egui::vec2(slider_w, slider_h),
+        );
+        let mut up_just_pressed = false;
+
+        egui::Area::new(Id::new("touch_land_capsule"))
+            .fixed_pos(capsule_rect.min)
+            .interactable(true)
+            .show(ctx_mut, |ui| {
+                let (rect, resp) = ui.allocate_exact_size(capsule_rect.size(), egui::Sense::click_and_drag());
+                let resp = sfx_play(resp);
+
+                if cli.touch_controls_edit_mode && resp.dragged() {
+                    if let Some(pointer_pos) = resp.interact_pointer_pos() {
+                        let new_pos = to_uv(bevy::math::Vec2::new(pointer_pos.x, pointer_pos.y));
+                        if touch_cfg.vertical_slider_pos != new_pos {
+                            touch_cfg.vertical_slider_pos = new_pos;
+                            layout_changed = true;
+                        }
+                    }
+                }
+
+                let pointer_down = ui.input(|i| i.pointer.primary_down()) && !cli.touch_controls_edit_mode;
+                let pointer_pos = resp.interact_pointer_pos();
+                let top_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.center().y));
+                let bottom_rect = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.center().y), rect.max);
+
+                let top_pressed = pointer_down
+                    && resp.hovered()
+                    && pointer_pos.is_some_and(|p| top_rect.contains(p));
+                let bottom_pressed = pointer_down
+                    && resp.hovered()
+                    && pointer_pos.is_some_and(|p| bottom_rect.contains(p));
+
+                up_just_pressed = top_pressed && !*up_hold_prev;
+                *up_hold_prev = top_pressed;
+
+                let jump_active = top_pressed || action_pressed(touch_cfg.jump_button_action);
+                let crouch_active = bottom_pressed || action_pressed(touch_cfg.crouch_button_action);
+
+                if top_pressed {
+                    if matches!(touch_cfg.jump_button_action, TouchActionBinding::Jump) {
+                        buttons.jump_pressed = true;
+                    }
+                    if matches!(touch_cfg.jump_button_action, TouchActionBinding::Sneak) {
+                        buttons.crouch_pressed = true;
+                    }
+                }
+                if bottom_pressed {
+                    if matches!(touch_cfg.crouch_button_action, TouchActionBinding::Jump) {
+                        buttons.jump_pressed = true;
+                    }
+                    if matches!(touch_cfg.crouch_button_action, TouchActionBinding::Sneak) {
+                        buttons.crouch_pressed = true;
+                    }
+                }
+
+                let p = ui.painter();
+                let capsule_fill = if cli.touch_controls_edit_mode {
+                    Color32::from_rgba_premultiplied(255, 220, 120, 46)
+                } else {
+                    Color32::from_rgba_premultiplied(120, 180, 255, 34)
+                };
+                let capsule_stroke = if cli.touch_controls_edit_mode {
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(255, 220, 120, 220))
+                } else {
+                    egui::Stroke::new(2.0, Color32::from_rgba_premultiplied(140, 215, 255, 210))
+                };
+                p.rect(
+                    rect,
+                    egui::CornerRadius::same((slider_w * 0.48) as u8),
+                    capsule_fill,
+                    capsule_stroke,
+                    egui::StrokeKind::Middle,
+                );
+
+                let split_color = Color32::from_rgba_premultiplied(232, 245, 255, 180);
+                p.line_segment(
+                    [egui::pos2(rect.left() + 6.0, rect.center().y), egui::pos2(rect.right() - 6.0, rect.center().y)],
+                    egui::Stroke::new(1.6, split_color),
+                );
+
+                let up_fill = if jump_active {
+                    Color32::from_rgba_premultiplied(90, 210, 255, 135)
+                } else {
+                    Color32::TRANSPARENT
+                };
+                let down_fill = if crouch_active {
+                    Color32::from_rgba_premultiplied(255, 158, 96, 130)
+                } else {
+                    Color32::TRANSPARENT
+                };
+                p.rect_filled(top_rect.shrink2(egui::vec2(2.0, 2.0)), egui::CornerRadius::same((slider_w * 0.42) as u8), up_fill);
+                p.rect_filled(bottom_rect.shrink2(egui::vec2(2.0, 2.0)), egui::CornerRadius::same((slider_w * 0.42) as u8), down_fill);
+
+                let top_text_color = if jump_active { Color32::from_rgb(220, 250, 255) } else { Color32::from_rgb(180, 235, 255) };
+                let bottom_text_color = if crouch_active { Color32::from_rgb(255, 236, 214) } else { Color32::from_rgb(255, 205, 174) };
+                p.text(
+                    egui::pos2(rect.center().x, top_rect.center().y + if jump_active { 1.0 } else { 0.0 }),
+                    egui::Align2::CENTER_CENTER,
+                    "UP",
+                    egui::FontId::proportional(14.0),
+                    top_text_color,
+                );
+                p.text(
+                    egui::pos2(rect.center().x, bottom_rect.center().y + if crouch_active { 1.0 } else { 0.0 }),
+                    egui::Align2::CENTER_CENTER,
+                    "DOWN",
+                    egui::FontId::proportional(14.0),
+                    bottom_text_color,
+                );
+            });
+
+        if up_just_pressed && !show_for_edit {
+            let now = time.elapsed_secs();
+            let tap_window = cfg.controls.touch.fly_double_tap_window_secs.clamp(0.18, 0.65);
+            if now - *last_up_tap_time < tap_window {
+                if let Some(mut ctl) = query_controller.iter_mut().next() {
+                    ctl.is_flying = true;
+                }
+            }
+            *last_up_tap_time = now;
+        }
+
+        if !show_for_edit {
+            let jump_threshold = 0.35;
+            let touch_jump_pressed = buttons.jump_pressed || action_pressed(TouchActionBinding::Jump);
+            let touch_crouch_pressed = buttons.crouch_pressed || action_pressed(TouchActionBinding::Sneak);
+            buttons.jump_pressed = touch_jump_pressed;
+            buttons.crouch_pressed = touch_crouch_pressed;
+            buttons.vertical_axis = if touch_jump_pressed && !touch_crouch_pressed {
+                1.0
+            } else if touch_crouch_pressed && !touch_jump_pressed {
+                -1.0
+            } else {
+                0.0
+            };
+            buttons.vertical_active = buttons.vertical_axis.abs() > 0.01;
+
+            if buttons.jump_pressed || buttons.crouch_pressed {
+                if buttons.jump_pressed && !buttons.crouch_pressed && buttons.vertical_axis > jump_threshold {
+                    buttons.jump_pressed = true;
+                }
+                if buttons.crouch_pressed && !buttons.jump_pressed && buttons.vertical_axis < -jump_threshold {
+                    buttons.crouch_pressed = true;
+                }
+            }
+
+        }
+    }
     if show_for_edit {
         let pointer_down = ctx_mut.input(|i| i.pointer.primary_down());
         if layout_changed && !*drag_in_progress {
@@ -543,6 +1081,9 @@ pub fn hud_touch_sticks(
         }
     } else {
         *drag_in_progress = false;
+    }
+    if is_flying || show_for_edit {
+        *up_hold_prev = false;
     }
 
     if show_for_edit {

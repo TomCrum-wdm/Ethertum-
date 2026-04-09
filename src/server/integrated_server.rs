@@ -9,8 +9,10 @@ pub struct IntegratedServerPlugin;
 impl Plugin for IntegratedServerPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ServerInfo::default());
+        let mut rng = rand::thread_rng();
         app.insert_resource(ServerSettings {
-            port: 6000 + rand::thread_rng().gen_range(0..6000),
+            port: 6000 + rng.random_range(0..6000),
+            local_mode: true,
             ..default()
         });
 

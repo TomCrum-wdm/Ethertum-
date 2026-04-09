@@ -6,11 +6,13 @@ use bevy::{
     image::{ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
 };
 use avian3d::prelude::*;
+use bevy_renet::renet::RenetClient;
 use leafwing_input_manager::action_state::ActionState;
 
-use super::{meshgen, render::{self, FoliageMaterial, LiquidMaterial, TerrainMaterial}, ChannelRx, ChannelTx, Chunk, ChunkPtr, ChunkSystem, VoxShape};
+use super::{meshgen, render::{self, FoliageMaterial, LiquidMaterial, TerrainMaterial}, ChannelRx, ChannelTx, Chunk, ChunkPtr, ChunkSystem, VoxShape, WorldGenConfig};
 use crate::{
     client::prelude::*,
+    net::{CPacket, CellData, RenetClientHelper},
     util::{iter, AsMutRef},
 };
 
@@ -27,6 +29,37 @@ struct AssetDebug {
 
 pub struct ClientVoxelPlugin;
 
+#[derive(Component)]
+pub struct VoxelChunkRenderMesh;
+
+#[derive(Resource, Debug, Default)]
+pub struct VoxelMeshingStats {
+    pub remesh_queue: usize,
+    pub meshing_inflight: usize,
+    pub fast_pending_upgrade: usize,
+    pub submitted_surface_this_frame: usize,
+    pub submitted_full_this_frame: usize,
+    pub completed_surface_total: u64,
+    pub completed_full_total: u64,
+    pub surface_first_enabled: bool,
+    pub surface_only_enabled: bool,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct VoxelWorldGenStats {
+    pub gpu_enabled: bool,
+    pub batch_size: usize,
+    pub force_cpu_persisted_world: bool,
+    pub loading_queue: usize,
+    pub loading_inflight: usize,
+    pub submitted_gpu_this_frame: usize,
+    pub submitted_cpu_this_frame: usize,
+    pub completed_gpu_total: u64,
+    pub completed_cpu_total: u64,
+    pub gpu_fallback_total: u64,
+    pub last_backend_label: &'static str,
+}
+
 impl Plugin for ClientVoxelPlugin {
     fn build(&self, app: &mut App) {
 
@@ -37,7 +70,7 @@ impl Plugin for ClientVoxelPlugin {
             app.insert_resource(ChannelTx(tx));
             app.insert_resource(ChannelRx(rx));
 
-            let (tx, rx) = crate::channel_impl::unbounded::<Chunk>();
+            let (tx, rx) = crate::channel_impl::unbounded::<ChunkLoadingData>();
             app.insert_resource(ChannelTx(tx));
             app.insert_resource(ChannelRx(rx));
         }
@@ -49,6 +82,9 @@ impl Plugin for ClientVoxelPlugin {
 
         app.insert_resource(VoxelBrush::default());
         app.register_type::<VoxelBrush>();
+
+        app.insert_resource(VoxelMeshingStats::default());
+        app.insert_resource(VoxelWorldGenStats::default());
 
         app.insert_resource(HitResult::default());
         app.register_type::<HitResult>();
@@ -75,6 +111,7 @@ impl Plugin for ClientVoxelPlugin {
 
 fn on_world_init(
     mut cmds: Commands,
+    worldinfo: Res<WorldInfo>,
     asset_server: Res<AssetServer>,
     mut mtls_terrain: ResMut<Assets<ExtendedMaterial<StandardMaterial, TerrainMaterial>>>,
     mut mtls_foliage: ResMut<Assets<ExtendedMaterial<StandardMaterial, FoliageMaterial>>>,
@@ -83,6 +120,7 @@ fn on_world_init(
 ) {
     info!("Init ClientChunkSystem");
     let mut chunk_sys = ClientChunkSystem::new();
+    chunk_sys.world_config = worldinfo.world_config.clone();
     // Load images first and keep handles for debug/inspection on device
     let albedo_h = asset_server.load_with_settings::<Image, ImageLoaderSettings>(
         "baked/atlas_diff.png",
@@ -205,30 +243,125 @@ fn on_world_exit(mut cmds: Commands) {
     cmds.remove_resource::<ClientChunkSystem>();
 }
 
-type ChunkLoadingData = Chunk;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChunkGenBackend {
+    Cpu,
+    GpuFastPath,
+}
+
+type ChunkLoadingData = (Chunk, ChunkGenBackend);
 
 fn chunks_detect_load_and_unload(
     query_cam: Query<&Transform, With<CharacterControllerCamera>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
     mut chunks_loading: Local<HashSet<IVec3>>, // for detect/skip if is loading
+    mut loading_started_frame: Local<HashMap<IVec3, u64>>,
+    mut unload_cooldown_ticks: Local<HashMap<IVec3, u16>>,
+    mut last_valid_viewer_cp: Local<Option<IVec3>>,
+    mut frame_counter: Local<u64>,
     cfg: Res<ClientSettings>,
+    worldinfo: Res<WorldInfo>,
+    mut worldgen_stats: ResMut<VoxelWorldGenStats>,
 
     mut cmds: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
 
     tx_chunk_load: Res<ChannelTx<ChunkLoadingData>>,
     rx_chunk_load: Res<ChannelRx<ChunkLoadingData>>,
+    mut fallback_seen_total: Local<u64>,
 ) {
-    let Ok(cam_transform) = query_cam.single() else {
+    const UNLOAD_MARGIN_XY: i32 = 1;
+    const UNLOAD_MARGIN_Y: i32 = 1;
+    const UNLOAD_COOLDOWN_TICKS: u16 = 20;
+    const LOADING_TIMEOUT_FRAMES: u64 = 600;
+
+    *frame_counter = frame_counter.saturating_add(1);
+
+    let vp = if let Ok(cam_transform) = query_cam.single() {
+        if cam_transform.translation.is_finite() {
+            let cp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3());
+            *last_valid_viewer_cp = Some(cp);
+            cp
+        } else if let Some(cp) = *last_valid_viewer_cp {
+            cp
+        } else {
+            return;
+        }
+    } else if let Some(cp) = *last_valid_viewer_cp {
+        cp
+    } else {
         return;
     };
-    let vp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3()); // viewer pos
     #[cfg(target_arch = "wasm32")]
-    let vd = IVec2::new(cfg.chunks_load_distance.x.min(2), cfg.chunks_load_distance.y.min(1));
+    let vd = IVec2::new(cfg.chunks_load_distance.x.max(2), cfg.chunks_load_distance.y.max(1));
     #[cfg(not(target_arch = "wasm32"))]
-    let vd = cfg.chunks_load_distance;
+    let vd = IVec2::new(cfg.chunks_load_distance.x.max(2), cfg.chunks_load_distance.y.max(1));
+    let world_config = worldinfo.world_config.clone();
+    let world_seed = worldinfo.seed;
 
-    let max_loading = if cfg!(target_arch = "wasm32") { 2 } else { 8 };
+    // Recover from stalled async generation entries so these chunk positions can be retried.
+    let mut stale = Vec::new();
+    for (cp, start_frame) in loading_started_frame.iter() {
+        if frame_counter.saturating_sub(*start_frame) > LOADING_TIMEOUT_FRAMES {
+            stale.push(*cp);
+        }
+    }
+    for cp in stale {
+        loading_started_frame.remove(&cp);
+        if chunks_loading.remove(&cp) {
+            warn!("Worldgen loading timeout recovered at {}", cp);
+        }
+    }
+
+    let has_persisted_chunks = crate::voxel::world_has_persisted_chunks(&worldinfo.name);
+    let force_cpu_persisted = has_persisted_chunks && !cfg.gpu_worldgen_allow_persisted_world;
+    let backend_allows_gpu = match world_config.worldgen_backend {
+        crate::voxel::WorldGenBackendPreference::Auto => true,
+        crate::voxel::WorldGenBackendPreference::CpuCompatible => false,
+        crate::voxel::WorldGenBackendPreference::GpuFast => true,
+    };
+    let force_cpu_backend_pref = !backend_allows_gpu;
+    let allow_gpu_worldgen = cfg.gpu_worldgen && !force_cpu_persisted && backend_allows_gpu;
+
+    let batch_size = cfg.gpu_worldgen_batch_size.max(1) as usize;
+    let cpu_max_loading = cfg.cpu_worldgen_max_loading.clamp(1, 64) as usize;
+    let gpu_max_loading = cfg.gpu_worldgen_max_loading.clamp(16, 1024) as usize;
+    let backlog_mid = cfg.gpu_worldgen_adaptive_backlog_mid.clamp(1, 10_000) as usize;
+    let backlog_high = cfg
+        .gpu_worldgen_adaptive_backlog_high
+        .clamp(cfg.gpu_worldgen_adaptive_backlog_mid.max(1), 20_000) as usize;
+    let mult_low = cfg.gpu_worldgen_adaptive_mult_low.clamp(1, 32) as usize;
+    let mult_mid = cfg.gpu_worldgen_adaptive_mult_mid.clamp(mult_low as i32, 64) as usize;
+    let mult_high = cfg.gpu_worldgen_adaptive_mult_high.clamp(mult_mid as i32, 128) as usize;
+    let adaptive_batch_min = cfg.gpu_worldgen_adaptive_batch_min.clamp(1, 2048) as usize;
+    let adaptive_batch_max = cfg
+        .gpu_worldgen_adaptive_batch_max
+        .clamp(cfg.gpu_worldgen_adaptive_batch_min.max(1), 4096) as usize;
+
+    let max_loading = if cfg!(target_arch = "wasm32") {
+        2
+    } else if allow_gpu_worldgen {
+        // GPU path can process wider batches efficiently; size is user-configurable.
+        gpu_max_loading
+    } else {
+        cpu_max_loading
+    };
+
+    worldgen_stats.gpu_enabled = allow_gpu_worldgen;
+    worldgen_stats.batch_size = cfg.gpu_worldgen_batch_size.max(1) as usize;
+    worldgen_stats.force_cpu_persisted_world = cfg.gpu_worldgen && force_cpu_persisted;
+    worldgen_stats.loading_inflight = chunks_loading.len();
+    worldgen_stats.submitted_gpu_this_frame = 0;
+    worldgen_stats.submitted_cpu_this_frame = 0;
+    worldgen_stats.gpu_fallback_total = super::worldgen::gpu_worldgen_fallback_total();
+
+    if worldgen_stats.force_cpu_persisted_world {
+        worldgen_stats.last_backend_label = "CPU (Persisted Save Compat)";
+    } else if force_cpu_backend_pref {
+        worldgen_stats.last_backend_label = "CPU (World Pref: Compatible)";
+    }
+
+    let mut pending_positions = Vec::new();
 
     // Chunks Detect Load/Gen
 
@@ -244,41 +377,140 @@ fn chunks_detect_load_and_unload(
             return;
         }
 
+        pending_positions.push(chunkpos);
+    });
+
+    while !pending_positions.is_empty() && chunks_loading.len() < max_loading {
+        let remaining = max_loading.saturating_sub(chunks_loading.len());
+        if remaining == 0 {
+            break;
+        }
+
+        let can_use_gpu = allow_gpu_worldgen && pending_positions.len() >= 2;
+        if can_use_gpu {
+            // Adaptive batching: increase batch size when queue backlog is large.
+            let adaptive_batch_size = if pending_positions.len() > backlog_high {
+                (batch_size * mult_high).clamp(adaptive_batch_min, adaptive_batch_max)
+            } else if pending_positions.len() > backlog_mid {
+                (batch_size * mult_mid).clamp(adaptive_batch_min, adaptive_batch_max)
+            } else {
+                (batch_size * mult_low).clamp(adaptive_batch_min, adaptive_batch_max)
+            };
+            let take_n = pending_positions.len().min(adaptive_batch_size).min(remaining);
+            let positions: Vec<IVec3> = pending_positions.drain(0..take_n).collect();
+            let submitted_gpu = positions.len();
+            for &chunkpos in &positions {
+                chunks_loading.insert(chunkpos);
+                loading_started_frame.insert(chunkpos, *frame_counter);
+            }
+
+            let tx = tx_chunk_load.clone();
+            let world_config = world_config.clone();
+            let world_seed = world_seed;
+            let positions_for_task = positions;
+            let task = AsyncComputeTaskPool::get().spawn(async move {
+                let chunks = super::worldgen::generate_chunks_gpu_batched(&positions_for_task, &world_config, world_seed);
+                for chunk in chunks {
+                    if tx.send((chunk, ChunkGenBackend::GpuFastPath)).is_err() {
+                        warn!("Chunk loading channel closed");
+                        break;
+                    }
+                }
+            });
+            task.detach();
+            worldgen_stats.last_backend_label = "GPU";
+            worldgen_stats.submitted_gpu_this_frame += submitted_gpu;
+            continue;
+        }
+
+        let chunkpos = pending_positions.remove(0);
+
         let tx = tx_chunk_load.clone();
+        let world_config = world_config.clone();
+        let world_seed = world_seed;
         let task = AsyncComputeTaskPool::get().spawn(async move {
             // info!("Load Chunk: {:?}", chunkpos);
             let mut chunk = Chunk::new(chunkpos);
 
-            // 获取全局ClientSettings
-            // TODO: 这里应由上层系统传入settings参数，临时用默认值防止编译错误
-            let settings = crate::client::settings::ClientSettings::default();
-            super::worldgen::generate_chunk(&mut chunk, &settings);
+            super::worldgen::generate_chunk(&mut chunk, &world_config, world_seed);
 
-            if tx.send(chunk).is_err() {
+            if tx.send((chunk, ChunkGenBackend::Cpu)).is_err() {
                 warn!("Chunk loading channel closed");
             }
         });
         task.detach();
         chunks_loading.insert(chunkpos);
-    });
+        loading_started_frame.insert(chunkpos, *frame_counter);
+        if worldgen_stats.force_cpu_persisted_world {
+            worldgen_stats.last_backend_label = "CPU (Persisted Save Compat)";
+        } else if force_cpu_backend_pref {
+            worldgen_stats.last_backend_label = "CPU (World Pref: Compatible)";
+        } else {
+            worldgen_stats.last_backend_label = "CPU";
+        }
+        worldgen_stats.submitted_cpu_this_frame += 1;
+    }
 
-    while let Ok(chunk) = rx_chunk_load.try_recv() {
+    while let Ok((chunk, backend)) = rx_chunk_load.try_recv() {
         chunks_loading.remove(&chunk.chunkpos);
+        loading_started_frame.remove(&chunk.chunkpos);
+
+        match backend {
+            ChunkGenBackend::Cpu => {
+                worldgen_stats.completed_cpu_total += 1;
+                if worldgen_stats.force_cpu_persisted_world {
+                    worldgen_stats.last_backend_label = "CPU (Persisted Save Compat)";
+                } else if force_cpu_backend_pref {
+                    worldgen_stats.last_backend_label = "CPU (World Pref: Compatible)";
+                } else {
+                    worldgen_stats.last_backend_label = "CPU";
+                }
+            }
+            ChunkGenBackend::GpuFastPath => {
+                worldgen_stats.completed_gpu_total += 1;
+                worldgen_stats.last_backend_label = "GPU";
+            }
+        }
 
         chunk_sys.spawn_chunk(chunk, &mut cmds, &mut meshes);
+    }
+
+    worldgen_stats.loading_queue = pending_positions.len();
+    worldgen_stats.loading_inflight = chunks_loading.len();
+    worldgen_stats.gpu_fallback_total = super::worldgen::gpu_worldgen_fallback_total();
+    if worldgen_stats.gpu_fallback_total > *fallback_seen_total {
+        worldgen_stats.last_backend_label = "GPU->CPU FALLBACK";
+        *fallback_seen_total = worldgen_stats.gpu_fallback_total;
     }
 
     // Chunks Unload
 
     let chunkpos_all = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
     for chunkpos in chunkpos_all {
-        if !crate::voxel::is_chunk_in_load_distance(vp, chunkpos, vd) {
+        if crate::voxel::is_chunk_in_unload_distance(vp, chunkpos, vd, UNLOAD_MARGIN_XY, UNLOAD_MARGIN_Y) {
+            unload_cooldown_ticks.remove(&chunkpos);
+            continue;
+        }
+
+        let cooldown = unload_cooldown_ticks.entry(chunkpos).or_insert(0);
+        *cooldown = cooldown.saturating_add(1);
+        if *cooldown >= UNLOAD_COOLDOWN_TICKS {
             chunk_sys.despawn_chunk(chunkpos, &mut cmds);
+            unload_cooldown_ticks.remove(&chunkpos);
         }
     }
+
+    unload_cooldown_ticks.retain(|cp, _| chunk_sys.has_chunk(*cp));
+    loading_started_frame.retain(|cp, _| chunks_loading.contains(cp));
 }
 
-type ChunkRemeshData = (IVec3, Entity, Mesh, Handle<Mesh>, Option<Collider>, Mesh, Handle<Mesh>, Mesh, Handle<Mesh>);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChunkMeshStage {
+    SurfaceFast,
+    FullQuality,
+}
+
+type ChunkRemeshData = (IVec3, Entity, Mesh, Handle<Mesh>, Option<Collider>, Mesh, Handle<Mesh>, Mesh, Handle<Mesh>, ChunkMeshStage);
 
 use once_cell::sync::Lazy;
 use std::{cell::RefCell, sync::Arc};
@@ -292,15 +524,31 @@ fn chunks_remesh_enqueue(
 
     query_cam: Query<&Transform, With<CharacterControllerCamera>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
+    cfg: Res<ClientSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut meshing_stats: ResMut<VoxelMeshingStats>,
 
     tx_chunks_meshing: Res<ChannelTx<ChunkRemeshData>>,
     rx_chunks_meshing: Res<ChannelRx<ChunkRemeshData>>,
+    mut fast_ready_chunks: Local<HashSet<IVec3>>,
 
     // mut foliage_mtls: ResMut<Assets<FoliageMaterial>>,
     // time: Res<Time>,
 ) {
     // foliage_mtls.get_mut(chunk_sys.mtl_foliage.id()).unwrap().time = time.elapsed_seconds();
+
+    if !cfg.surface_first_meshing && !cfg.surface_only_meshing {
+        fast_ready_chunks.clear();
+    } else {
+        fast_ready_chunks.retain(|cp| chunk_sys.has_chunk(*cp));
+    }
+
+    meshing_stats.surface_first_enabled = cfg.surface_first_meshing;
+    meshing_stats.surface_only_enabled = cfg.surface_only_meshing;
+    meshing_stats.remesh_queue = chunk_sys.chunks_remesh.len();
+    meshing_stats.meshing_inflight = chunk_sys.chunks_meshing.len();
+    meshing_stats.submitted_surface_this_frame = 0;
+    meshing_stats.submitted_full_this_frame = 0;
 
     let mut chunks_remesh = Vec::from_iter(chunk_sys.chunks_remesh.iter().cloned());
 
@@ -308,8 +556,20 @@ fn chunks_remesh_enqueue(
     let Ok(cam_transform) = query_cam.single() else {
         return;
     };
-    let cam_cp = Chunk::as_chunkpos(cam_transform.translation.as_ivec3());
-    chunks_remesh.sort_unstable_by_key(|cp: &IVec3| bevy::math::FloatOrd(cp.distance_squared(cam_cp) as f32));
+    let cam_pos = cam_transform.translation;
+    let cam_forward = *cam_transform.forward();
+    let half_fov_cos = (cfg.fov.to_radians() * 0.5).cos();
+    let cam_cp = Chunk::as_chunkpos(cam_pos.as_ivec3());
+    chunks_remesh.sort_unstable_by_key(|cp: &IVec3| {
+        let center = cp.as_vec3() + Vec3::splat(Chunk::LEN as f32 * 0.5);
+        let view_dir = (center - cam_pos).normalize_or_zero();
+        let in_view = view_dir.dot(cam_forward) >= half_fov_cos;
+
+        (
+            if in_view { 0 } else { 1 },
+            bevy::math::FloatOrd(cp.distance_squared(cam_cp) as f32),
+        )
+    });
 
     for chunkpos in chunks_remesh {
         if chunk_sys.chunks_meshing.len() >= chunk_sys.max_concurrent_meshing {
@@ -325,6 +585,18 @@ fn chunks_remesh_enqueue(
 
             let chunkptr = chunkptr.clone();
             let tx = tx_chunks_meshing.clone();
+            let stage = if cfg.surface_only_meshing {
+                ChunkMeshStage::SurfaceFast
+            } else if cfg.surface_first_meshing && !fast_ready_chunks.contains(&chunkpos) {
+                ChunkMeshStage::SurfaceFast
+            } else {
+                ChunkMeshStage::FullQuality
+            };
+
+            match stage {
+                ChunkMeshStage::SurfaceFast => meshing_stats.submitted_surface_this_frame += 1,
+                ChunkMeshStage::FullQuality => meshing_stats.submitted_full_this_frame += 1,
+            }
 
             let task = AsyncComputeTaskPool::get().spawn(async move {
                 let mut _vbuf = THREAD_LOCAL_VERTEX_BUFFERS
@@ -341,7 +613,11 @@ fn chunks_remesh_enqueue(
                     let chunk = chunkptr.as_ref();
 
                     // Generate Mesh
-                    meshgen::generate_chunk_mesh(&mut _vbuf.0, chunk);
+                    if stage == ChunkMeshStage::SurfaceFast {
+                        meshgen::generate_chunk_mesh_surface_fast(&mut _vbuf.0, chunk);
+                    } else {
+                        meshgen::generate_chunk_mesh(&mut _vbuf.0, chunk);
+                    }
 
                     meshgen::generate_chunk_mesh_foliage(&mut _vbuf.1, chunk);
 
@@ -402,7 +678,18 @@ fn chunks_remesh_enqueue(
                 _vbuf.2.clear();
 
                 if tx
-                    .send((chunkpos, entity, mesh_terrain, mesh_handle_terrain, collider, mesh_foliage, mesh_handle_foliage, mesh_liquid, mesh_handle_liquid))
+                    .send((
+                        chunkpos,
+                        entity,
+                        mesh_terrain,
+                        mesh_handle_terrain,
+                        collider,
+                        mesh_foliage,
+                        mesh_handle_foliage,
+                        mesh_liquid,
+                        mesh_handle_liquid,
+                        stage,
+                    ))
                     .is_err()
                 {
                     warn!("Chunk meshing channel closed");
@@ -418,7 +705,19 @@ fn chunks_remesh_enqueue(
         chunk_sys.chunks_remesh.remove(&chunkpos);
     }
 
-    while let Ok((chunkpos, entity, mesh_terrain, mesh_handle_terrain, collider, mesh_foliage, mesh_handle_foliage, mesh_liquid, mesh_handle_liquid)) = rx_chunks_meshing.try_recv() {
+    while let Ok((
+        chunkpos,
+        entity,
+        mesh_terrain,
+        mesh_handle_terrain,
+        collider,
+        mesh_foliage,
+        mesh_handle_foliage,
+        mesh_liquid,
+        mesh_handle_liquid,
+        stage,
+    )) = rx_chunks_meshing.try_recv()
+    {
         // Update Mesh Asset
         if let Some(dst) = meshes.get_mut(mesh_handle_terrain.id()) {
             *dst = mesh_terrain;
@@ -445,8 +744,34 @@ fn chunks_remesh_enqueue(
         }
 
         chunk_sys.chunks_meshing.remove(&chunkpos);
+
+        if cfg.surface_only_meshing {
+            if stage == ChunkMeshStage::SurfaceFast {
+                fast_ready_chunks.insert(chunkpos);
+                meshing_stats.completed_surface_total += 1;
+            }
+        } else if cfg.surface_first_meshing {
+            if stage == ChunkMeshStage::SurfaceFast {
+                fast_ready_chunks.insert(chunkpos);
+                chunk_sys.chunks_remesh.insert(chunkpos);
+                meshing_stats.completed_surface_total += 1;
+            } else {
+                fast_ready_chunks.remove(&chunkpos);
+                meshing_stats.completed_full_total += 1;
+            }
+        } else if stage == ChunkMeshStage::FullQuality {
+            meshing_stats.completed_full_total += 1;
+        }
         // info!("[ReMesh Completed] Pos: {}; ReMesh: {}, Meshing: {}: tx: {}, rx: {}", chunkpos, chunk_sys.chunks_remesh.len(), cli.chunks_meshing.len(), tx_chunks_meshing.len(), rx_chunks_meshing.len());
     }
+
+    meshing_stats.fast_pending_upgrade = if cfg.surface_first_meshing && !cfg.surface_only_meshing {
+        fast_ready_chunks.len()
+    } else {
+        0
+    };
+    meshing_stats.remesh_queue = chunk_sys.chunks_remesh.len();
+    meshing_stats.meshing_inflight = chunk_sys.chunks_meshing.len();
 }
 
 #[derive(Resource, Reflect)]
@@ -484,12 +809,14 @@ fn raycast(
     spatial_query: SpatialQuery,
     query_cam: Query<&GlobalTransform, With<CharacterControllerCamera>>, // ray
     query_player: Query<Entity, With<CharacterController>>,              // exclude collider
+    key: Res<ButtonInput<KeyCode>>,
     mut hit_result: ResMut<HitResult>,
     touches: Res<Touches>,
     touch_buttons: Res<TouchButtonState>,
 
     query_input: Query<&ActionState<InputAction>>,
     mut chunk_sys: ResMut<ClientChunkSystem>,
+    mut net_client: Option<ResMut<RenetClient>>,
     cli: Res<ClientInfo>,
     cfg: Res<ClientSettings>,
     vox_brush: Res<VoxelBrush>,
@@ -528,8 +855,14 @@ fn raycast(
 
     // ############ Break & Place ############
 
-    if cli.curr_ui != CurrentUI::None {
+    let in_world_editor_ui = cli.curr_ui == CurrentUI::WorldEditor;
+
+    if cli.curr_ui != CurrentUI::None && !in_world_editor_ui {
         // todo: cli.is_manipulating()
+        return;
+    }
+
+    if !cli.is_admin {
         return;
     }
 
@@ -547,7 +880,14 @@ fn raycast(
         action_state.just_pressed(&InputAction::Attack) || touch_count_just_pressed == 1
     };
     #[cfg(not(target_os = "android"))]
-    let do_break = action_state.just_pressed(&InputAction::Attack);
+    let do_break = {
+        let trigger = action_state.just_pressed(&InputAction::Attack);
+        if in_world_editor_ui {
+            trigger && (key.pressed(KeyCode::ControlLeft) || key.pressed(KeyCode::ControlRight))
+        } else {
+            trigger
+        }
+    };
 
     #[cfg(target_os = "android")]
     let do_place = if cfg.touch_ui {
@@ -556,11 +896,19 @@ fn raycast(
         action_state.just_pressed(&InputAction::UseItem) || touch_count_just_pressed >= 2
     };
     #[cfg(not(target_os = "android"))]
-    let do_place = action_state.just_pressed(&InputAction::UseItem);
+    let do_place = {
+        let trigger = action_state.just_pressed(&InputAction::UseItem);
+        if in_world_editor_ui {
+            trigger && (key.pressed(KeyCode::ControlLeft) || key.pressed(KeyCode::ControlRight))
+        } else {
+            trigger
+        }
+    };
 
     if hit_result.is_hit && (do_break || do_place) {
         let brush = &*vox_brush;
         let n = brush.size as i32;
+        let mut changed_cells: HashMap<IVec3, Vec<CellData>> = HashMap::new();
 
         // These code is Horrible
 
@@ -590,16 +938,24 @@ fn raycast(
                     }
                 }
 
-                chunk_sys.mark_chunk_remesh(Chunk::as_chunkpos(p)); // CLIS
+                let chunkpos = Chunk::as_chunkpos(p);
+                let local_idx = Chunk::local_idx(Chunk::as_localpos(p)) as u16;
+                let cell_data = CellData::from_cell(local_idx, v);
+
+                chunk_sys.mark_chunk_remesh(chunkpos); // CLIS
+
+                changed_cells
+                    .entry(chunkpos)
+                    .or_insert_with(Vec::new)
+                    .push(cell_data);
             }
         });
-        // let mut map = HashMap::new();
-        // let pack = map.entry(chunkpos).or_insert_with(Vec::new);
-        // pack.push(CellData::from_cell(Chunk::local_idx(Chunk::as_localpos(p)) as u16, &c));
-        // info!("Modify terrain sent {}", map.len());
-        // for e in map {
-        //     net_client.send_packet(&CPacket::ChunkModify { chunkpos: e.0, voxel: e.1 });
-        // }
+
+        if let Some(net_client) = net_client.as_mut() {
+            for (chunkpos, voxel) in changed_cells {
+                net_client.send_packet(&CPacket::ChunkModify { chunkpos, voxel });
+            }
+        }
     }
 }
 
@@ -617,6 +973,10 @@ fn draw_crosshair_cube(mut gizmos: Gizmos, hit_result: Res<HitResult>, vbrush: R
 }
 
 fn draw_gizmos(mut gizmos: Gizmos, chunk_sys: Res<ClientChunkSystem>, cli: Res<ClientInfo>, query_cam: Query<&Transform, With<CharacterController>>) {
+    if !cli.dbg_gizmo_all_loaded_chunks {
+        return;
+    }
+
     // // chunks loading
     // for cp in chunk_sys.chunks_loading.keys() {
     //     gizmos.cuboid(
@@ -683,6 +1043,7 @@ pub struct ClientChunkSystem {
 
     pub max_concurrent_meshing: usize,
     pub chunks_meshing: HashSet<IVec3>,
+    pub world_config: WorldGenConfig,
     // pub chunks_load_distance: IVec2, // not real, but send to server,
 }
 
@@ -712,6 +1073,7 @@ impl ClientChunkSystem {
 
             max_concurrent_meshing: 8,
             chunks_meshing: HashSet::default(),
+            world_config: WorldGenConfig::default(),
         }
     }
 
@@ -736,6 +1098,7 @@ impl ClientChunkSystem {
                     MeshMaterial3d(self.mtl_terrain.clone()), //materials.add(Color::rgb(0.8, 0.7, 0.6)),
                     Transform::from_translation(chunkpos.as_vec3()),
                     Visibility::Hidden, // Hidden is required since Mesh is empty. or WGPU will crash. even if use default Inherite
+                    VoxelChunkRenderMesh,
                 ),
                 aabb,
                 avian3d::prelude::RigidBody::Static,
@@ -745,6 +1108,7 @@ impl ClientChunkSystem {
                         Mesh3d(chunk.mesh_handle_foliage.clone()),
                         MeshMaterial3d(self.mtl_foliage.clone()),
                         Visibility::Visible, // Hidden is required since Mesh is empty. or WGPU will crash
+                        VoxelChunkRenderMesh,
                     ),
                     aabb,
                 ));
@@ -752,6 +1116,7 @@ impl ClientChunkSystem {
                         Mesh3d(chunk.mesh_handle_liquid.clone()),
                         MeshMaterial3d(self.mtl_liquid.clone()),
                         Visibility::Visible,
+                        VoxelChunkRenderMesh,
                     ),
                     aabb,
                 ));
@@ -784,7 +1149,7 @@ impl ClientChunkSystem {
                         if neib_chunk.is_neighbors_all_loaded() && !neib_chunk.is_populated {
                             // neighbors_completed.push(neib_chunk.chunkpos);
                             neib_chunk.is_populated = true;
-                            super::worldgen::populate_chunk(neib_chunk); // todo: ChunkGen Thread
+                            super::worldgen::populate_chunk(neib_chunk, &self.world_config); // todo: ChunkGen Thread
 
                             self.mark_chunk_remesh(neib_chunk.chunkpos);
 

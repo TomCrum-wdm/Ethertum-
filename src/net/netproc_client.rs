@@ -48,6 +48,7 @@ pub fn client_sys(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
+    mut query_controller: Query<&mut CharacterController>,
     // entity_s2c: Local<HashMap<Entity, Entity>>,
 ) {
     let Some(mut net_client) = net_client else {
@@ -67,7 +68,6 @@ pub fn client_sys(
                 .map_or_else(|| "Unknown disconnect reason".to_string(), |r| r.to_string());
         }
 
-        cmds.remove_resource::<WorldInfo>(); // todo: cli.close_world();
         if net_client
             .disconnect_reason()
             .is_none_or(|r| r != DisconnectReason::DisconnectedByClient)
@@ -76,6 +76,13 @@ pub fn client_sys(
         }
 
         info!("Disconnected. {}", cli.disconnected_reason);
+
+        cli.is_owner = false;
+        cli.is_admin = false;
+        cli.admin_god_enabled = false;
+        cli.admin_noclip_enabled = false;
+        cli.admin_panel_open = false;
+        cli.global_editor_view = false;
     }
 
     while let Some(bytes) = net_client.receive_message(DefaultChannel::ReliableOrdered) {
@@ -113,8 +120,11 @@ pub fn client_sys(
                 );
                 // info!("Ping: rtt {}ms = c2s {} + s2c {}", cli.ping.0, cli.ping.1, cli.ping.2);
             }
-            SPacket::LoginSuccess { player_entity } => {
-                info!("Login Success!");
+            SPacket::LoginSuccess {
+                player_entity,
+                spawn_position,
+            } => {
+                info!("Login Success! spawn={}", spawn_position);
 
                 cli.curr_ui = CurrentUI::None;
 
@@ -122,6 +132,7 @@ pub fn client_sys(
                     &mut cmds.get_or_spawn(player_entity.client_entity()), // 为什么在这生成 因为要指定id，以及其他player也是在这生成
                     true,
                     &cfg.username,
+                    *spawn_position,
                     &asset_server,
                     &mut meshes,
                     &mut materials,
@@ -129,11 +140,40 @@ pub fn client_sys(
 
                 // cmds.insert_resource(WorldInfo::default());  // moved to Click Connect. 要在用之前初始化，如果现在标记 那么就来不及初始化 随后就有ChunkNew数据包 要用到资源
             }
+            SPacket::AdminState { state } => {
+                cli.is_owner = state.is_owner;
+                cli.is_admin = state.is_admin;
+                cli.admin_god_enabled = state.god_enabled;
+                cli.admin_noclip_enabled = state.noclip_enabled;
+                if !cli.is_admin {
+                    cli.admin_panel_open = false;
+                    cli.global_editor_view = false;
+                }
+
+                if let Ok(mut ctl) = query_controller.single_mut() {
+                    ctl.allow_god_mode = state.is_admin;
+                    ctl.is_flying = state.god_enabled;
+                    ctl.noclip_enabled = state.noclip_enabled;
+                }
+            }
+            SPacket::WorldInit {
+                world_name,
+                seed,
+                world_config,
+            } => {
+                worldinfo.name.clone_from(world_name);
+                worldinfo.seed = *seed;
+                worldinfo.world_config = world_config.clone();
+            }
             SPacket::Chat { message } => {
                 info!("[Chat]: {}", message);
                 chats.scrollback.push(message.clone());
             }
-            SPacket::EntityNew { entity_id, name } => {
+            SPacket::EntityNew {
+                entity_id,
+                name,
+                position,
+            } => {
                 info!("Spawn EntityNew {}", entity_id.raw());
 
                 // 客户端此时可能的确存在这个entity 因为内置的broadcast EntityPos 会发给所有客户端，包括没登录的
@@ -143,6 +183,7 @@ pub fn client_sys(
                     &mut cmds.get_or_spawn(entity_id.client_entity()),
                     false,
                     name,
+                    *position,
                     &asset_server,
                     &mut meshes,
                     &mut materials,
@@ -195,17 +236,8 @@ pub fn client_sys(
                 // info!("ChunkNew: {} ({})", chunkpos, chunk_sys.num_chunks());
             }
             SPacket::ChunkDel { chunkpos } => {
-                error!("ChunkDel: {} ({})", chunkpos, chunk_sys.num_chunks());
-
-                //     if let Some(chunkptr) = chunk_sys.despawn_chunk(*chunkpos) {
-                //         let entity = chunkptr.entity;
-
-                //         // bug crash: "Attempting to create an EntityCommands for entity 9649v15, which doesn't exist."
-                //         // why the entity may not exists even if it in the chunk_sys?
-                //         if let Some(cmds) = cmds.get_entity(entity) {
-                //             cmds.despawn_recursive();
-                //         }
-                //     }
+                info!("ChunkDel: {} ({})", chunkpos, chunk_sys.num_chunks());
+                chunk_sys.despawn_chunk(*chunkpos, &mut cmds);
             }
             SPacket::ChunkModify { chunkpos, voxel } => {
                 info!("ChunkModify: {}", chunkpos);
@@ -230,12 +262,53 @@ pub fn client_sys(
             }
         }
     }
+
+    // Consume chunk packets from ReliableUnordered channel (channel 1).
+    // If this channel is not drained, its receive queue can grow until exhaustion.
+    while let Some(bytes) = net_client.receive_message(DefaultChannel::ReliableUnordered) {
+        let packet: SPacket = match bincode::deserialize(&bytes[..]) {
+            Ok(packet) => packet,
+            Err(err) => {
+                warn!("Failed to deserialize SPacket (unordered): {}", err);
+                continue;
+            }
+        };
+
+        match &packet {
+            SPacket::ChunkNew { chunkpos, voxel } => {
+                let mut chunk = Chunk::new(*chunkpos);
+                CellData::to_chunk(voxel, &mut chunk);
+                chunk_sys.spawn_chunk(chunk, &mut cmds, &mut *meshes);
+            }
+            SPacket::ChunkModify { chunkpos, voxel } => {
+                chunk_sys.mark_chunk_remesh(*chunkpos);
+
+                for data in voxel {
+                    let lp = Chunk::local_idx_pos(data.local_idx as i32);
+                    let neib = Chunk::at_boundary_naive(lp);
+                    if neib != -1 {
+                        chunk_sys.mark_chunk_remesh(*chunkpos + Chunk::NEIGHBOR_DIR[neib as usize] * Chunk::LEN);
+                    }
+                }
+
+                if let Some(chunk) = chunk_sys.get_chunk(*chunkpos) {
+                    CellData::to_chunk(voxel, chunk.as_mut());
+                } else {
+                    warn!("ChunkModify(unordered) received for missing chunk {}", chunkpos);
+                }
+            }
+            _ => {
+                // Unexpected packet on unordered channel; ignore safely.
+            }
+        }
+    }
 }
 
 pub fn spawn_player(
     ec: &mut EntityCommands,
     is_theplayer: bool,
     _name: &String,
+    spawn_position: Vec3,
     // cmds: &mut Commands,
     _asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -253,7 +326,7 @@ pub fn spawn_player(
                 half_length: 0.9,
             })),
             MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
-            Transform::from_xyz(0.0, 0.0, 0.0),
+            Transform::from_translation(spawn_position),
         ),
         DespawnOnWorldUnload,
     ))

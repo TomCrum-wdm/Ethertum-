@@ -7,6 +7,143 @@ use bevy_egui::{
 use super::{new_egui_window, sfx_play, ui_lr_panel};
 use crate::client::prelude::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingTag {
+    Performance,
+    Fun,
+    Dangerous,
+}
+
+impl SettingTag {
+    fn color(self) -> Color32 {
+        match self {
+            SettingTag::Performance => Color32::from_rgb(70, 140, 255),
+            SettingTag::Fun => Color32::from_rgb(180, 90, 255),
+            SettingTag::Dangerous => Color32::from_rgb(255, 70, 70),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SettingTag::Performance => "Performance",
+            SettingTag::Fun => "Fun",
+            SettingTag::Dangerous => "Dangerous",
+        }
+    }
+}
+
+#[derive(Default)]
+struct TagScore {
+    perf: i32,
+    fun: i32,
+    danger: i32,
+}
+
+fn manual_setting_tags(label: &str) -> Option<Vec<SettingTag>> {
+    match label {
+        "Default Terrain For New Worlds" => Some(vec![SettingTag::Fun, SettingTag::Dangerous]),
+        "Surface-Only (No Full Upgrade)" => Some(vec![SettingTag::Performance, SettingTag::Dangerous]),
+        "GPU WorldGen" => Some(vec![SettingTag::Performance, SettingTag::Fun, SettingTag::Dangerous]),
+        "Allow GPU On Persisted Worlds" => Some(vec![SettingTag::Performance, SettingTag::Dangerous]),
+        "Reset Recommended WorldGen Values" => Some(vec![SettingTag::Dangerous]),
+        "Layout Edit Mode" => Some(vec![SettingTag::Fun, SettingTag::Dangerous]),
+        "Export + Copy" => Some(vec![SettingTag::Fun, SettingTag::Dangerous]),
+        "Import From Text" => Some(vec![SettingTag::Fun, SettingTag::Dangerous]),
+        _ => None,
+    }
+}
+
+fn score_keywords(s: &str) -> TagScore {
+    let mut score = TagScore::default();
+
+    let perf_kw = [
+        "gpu", "cpu", "batch", "backlog", "window", "distance", "vsync", "fxaa", "tonemapping", "bloom", "ssr",
+        "fog", "shadow", "quality", "dead zone", "sensitivity", "concurrency", "scale", "render", "illumina",
+    ];
+    let fun_kw = [
+        "planet", "flat", "terrain", "fov", "touch", "day time", "indicator", "brush", "tex", "size", "intensity",
+        "jump", "sprint", "sneak", "skybox", "ui", "preset", "name", "username",
+    ];
+    let danger_kw = [
+        "experimental", "persisted", "surface-only", "reset", "import", "delete", "undo", "layout edit", "share", "copy",
+        "worldgen", "adaptive", "multiplier", "spawn", "gravity",
+    ];
+
+    for kw in perf_kw {
+        if s.contains(kw) {
+            score.perf += 2;
+        }
+    }
+    for kw in fun_kw {
+        if s.contains(kw) {
+            score.fun += 2;
+        }
+    }
+    for kw in danger_kw {
+        if s.contains(kw) {
+            score.danger += 2;
+        }
+    }
+
+    if s.contains("adaptive") || s.contains("batch") || s.contains("window") {
+        score.perf += 2;
+        score.danger += 1;
+    }
+    if s.contains("planet") || s.contains("gravity") || s.contains("terrain") {
+        score.fun += 2;
+        score.danger += 1;
+    }
+
+    score
+}
+
+fn classify_setting_tags(label: &str) -> Vec<SettingTag> {
+    if let Some(tags) = manual_setting_tags(label) {
+        return tags;
+    }
+
+    let s = label.to_ascii_lowercase();
+    let score = score_keywords(&s);
+    let max_score = score.perf.max(score.fun).max(score.danger);
+
+    let mut tags = Vec::new();
+    if score.perf >= 2 && (score.perf >= max_score - 1) {
+        tags.push(SettingTag::Performance);
+    }
+    if score.fun >= 2 && (score.fun >= max_score - 1) {
+        tags.push(SettingTag::Fun);
+    }
+    if score.danger >= 2 && (score.danger >= max_score - 1) {
+        tags.push(SettingTag::Dangerous);
+    }
+
+    if tags.is_empty() {
+        tags.push(SettingTag::Performance);
+    }
+    tags
+}
+
+fn draw_tag_strips(ui: &mut Ui, tags: &[SettingTag]) {
+    for (i, tag) in tags.iter().enumerate() {
+        let (strip_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, 22.0), egui::Sense::hover());
+        ui.painter().rect_filled(strip_rect, 1.0, tag.color());
+        if i + 1 < tags.len() {
+            ui.add_space(2.0);
+        }
+    }
+}
+
+fn ui_setting_legend(ui: &mut Ui) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Legend:");
+        for tag in [SettingTag::Performance, SettingTag::Fun, SettingTag::Dangerous] {
+            ui.colored_label(tag.color(), format!("| {}", tag.label()));
+        }
+    });
+    ui.small("One option may have multiple tags. Multiple colored bars mean mixed traits.");
+    ui.small("Dangerous options can cause compatibility/perf issues and should be changed carefully.");
+}
+
 #[derive(Default, PartialEq, Debug, Clone, Copy)]
 pub enum SettingsPanel {
     #[default]
@@ -21,10 +158,11 @@ pub enum SettingsPanel {
     // Credits,
 }
 
-
-pub fn ui_setting_line(ui: &mut Ui, text: impl Into<egui::RichText>, widget: impl Widget) {
+pub fn ui_setting_line(ui: &mut Ui, text: &str, widget: impl Widget) {
+    let tags = classify_setting_tags(text);
     ui.horizontal(|ui| {
-        ui.add_space(20.);
+        draw_tag_strips(ui, &tags);
+        ui.add_space(12.);
         ui.colored_label(Color32::WHITE, text);
         let end_width = 150.;
         let end_margin = 8.;
@@ -37,6 +175,20 @@ pub fn ui_setting_line(ui: &mut Ui, text: impl Into<egui::RichText>, widget: imp
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(end_margin);
             ui.add_sized([end_width, 22.], widget);
+        });
+    });
+}
+
+pub fn ui_setting_line_custom(ui: &mut Ui, text: &str, add_widget: impl FnOnce(&mut Ui)) {
+    let tags = classify_setting_tags(text);
+    ui.horizontal(|ui| {
+        draw_tag_strips(ui, &tags);
+        ui.add_space(12.);
+        ui.colored_label(Color32::WHITE, text);
+        let end_margin = 8.;
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(end_margin);
+            add_widget(ui);
         });
     });
 }
@@ -88,104 +240,150 @@ pub fn ui_settings(
                 ui.style_mut().spacing.item_spacing.y = 12.;
 
                 ui.add_space(16.);
+                ui_setting_legend(ui);
+                ui.separator();
 
                 match curr_settings_panel {
                     SettingsPanel::General => {
-                        ui.label("Profile: ");
-
+                        ui.label("Profile");
                         ui_setting_line(ui, "Username", egui::TextEdit::singleline(&mut cfg.username));
                         ui_setting_line(ui, "Touch UI (large buttons)", egui::Checkbox::new(&mut cfg.touch_ui, ""));
 
-                        // ui.group(|ui| {
-                        //     ui.horizontal(|ui| {
-                        //         ui.vertical(|ui| {
-                        //             ui.colored_label(Color32::WHITE, cli.cfg.username.clone());
-                        //             ui.small("ref.dreamtowards@gmail.com");
-                        //         });
+                        ui.separator();
+                        ui.label("World Streaming (Basic)");
+                        ui_setting_line(ui, "Chunk Load Distance X", egui::Slider::new(&mut cfg.chunks_load_distance.x, 2..=64));
+                        ui_setting_line(ui, "Chunk Load Distance Y", egui::Slider::new(&mut cfg.chunks_load_distance.y, 1..=32));
+                        ui_setting_line(ui, "Surface-First Meshing", egui::Checkbox::new(&mut cfg.surface_first_meshing, ""));
+                        ui_setting_line(ui, "Surface-Only (No Full Upgrade)", egui::Checkbox::new(&mut cfg.surface_only_meshing, ""));
+                        ui_setting_line(ui, "GPU WorldGen", egui::Checkbox::new(&mut cfg.gpu_worldgen, ""));
+                        ui_setting_line(
+                            ui,
+                            "Allow GPU On Persisted Worlds",
+                            egui::Checkbox::new(&mut cfg.gpu_worldgen_allow_persisted_world, ""),
+                        );
 
-                        //         ui.with_layout(Layout::right_to_left(egui::Align::TOP), |ui| {
-                        //             ui.button("Log out").clicked();
-                        //             if ui.button("Account Info").clicked() {
-                        //                 ui.ctx().open_url(egui::OpenUrl::new_tab("https://ethertia.com/profile/uuid"));
-                        //             }
-                        //         });
-                        //     });
-
-                        //     // if ui.button("Switch Account").clicked() {
-                        //     //     ui.ctx().open_url(egui::OpenUrl::new_tab("https://auth.ethertia.com/login?client"));
-                        //     // }
-                        // });
-
-                        // ui.label("General:");
-
-                        ui.label("Voxel:");
-
-                        // ui_setting_line(
-                        //     ui,
-                        //     "Chunks Meshing Max Concurrency",
-                        //     egui::Slider::new(&mut chunk_sys.max_concurrent_meshing, 0..=50),
-                        // );
-
-                        ui_setting_line(ui, "Chunk Load Distance X", egui::Slider::new(&mut cfg.chunks_load_distance.x, -1..=25));
-                        ui_setting_line(ui, "Chunk Load Distance Y", egui::Slider::new(&mut cfg.chunks_load_distance.y, -1..=25));
-
-                        ui.label("地形模式:");
-                        ui.horizontal(|ui| {
+                        ui_setting_line_custom(ui, "Default Terrain For New Worlds", |ui| {
                             let mode = &mut cfg.terrain_mode;
-                            let planet = *mode == crate::client::settings::TerrainMode::Planet;
-                            let flat = *mode == crate::client::settings::TerrainMode::Flat;
-                            if ui.radio(planet, "星球（球体）").clicked() {
-                                *mode = crate::client::settings::TerrainMode::Planet;
+                            let planet = *mode == crate::voxel::WorldTerrainMode::Planet;
+                            let flat = *mode == crate::voxel::WorldTerrainMode::Flat;
+                            let superflat = *mode == crate::voxel::WorldTerrainMode::SuperFlat;
+                            if ui.radio(planet, "Spherical Planet").clicked() {
+                                *mode = crate::voxel::WorldTerrainMode::Planet;
                             }
-                            if ui.radio(flat, "平面").clicked() {
-                                *mode = crate::client::settings::TerrainMode::Flat;
+                            if ui.radio(flat, "Flat World").clicked() {
+                                *mode = crate::voxel::WorldTerrainMode::Flat;
+                            }
+                            if ui.radio(superflat, "SuperFlat World").clicked() {
+                                *mode = crate::voxel::WorldTerrainMode::SuperFlat;
                             }
                         });
+
+                        ui_setting_line_custom(ui, "Reset Recommended WorldGen Values", |ui| {
+                            if ui.button("Reset").clicked() {
+                                cfg.surface_first_meshing = true;
+                                cfg.surface_only_meshing = false;
+                                cfg.gpu_worldgen = true;
+                                cfg.gpu_worldgen_allow_persisted_world = false;
+                                cfg.gpu_worldgen_batch_size = 16;
+                                cfg.gpu_worldgen_max_loading = 256;
+                                cfg.cpu_worldgen_max_loading = 8;
+                                cfg.gpu_worldgen_adaptive_backlog_mid = 24;
+                                cfg.gpu_worldgen_adaptive_backlog_high = 64;
+                                cfg.gpu_worldgen_adaptive_mult_low = 2;
+                                cfg.gpu_worldgen_adaptive_mult_mid = 4;
+                                cfg.gpu_worldgen_adaptive_mult_high = 12;
+                                cfg.gpu_worldgen_adaptive_batch_min = 16;
+                                cfg.gpu_worldgen_adaptive_batch_max = 768;
+                            }
+                        });
+
+                        egui::CollapsingHeader::new("Advanced GPU WorldGen Tuning")
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                ui_setting_line(ui, "GPU WorldGen Batch Size", egui::Slider::new(&mut cfg.gpu_worldgen_batch_size, 1..=128));
+                                ui_setting_line(ui, "GPU Max Loading Window", egui::Slider::new(&mut cfg.gpu_worldgen_max_loading, 16..=1024));
+                                ui_setting_line(ui, "CPU Max Loading Window", egui::Slider::new(&mut cfg.cpu_worldgen_max_loading, 1..=64));
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Backlog Mid",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_backlog_mid, 1..=1024),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Backlog High",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_backlog_high, 1..=2048),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Multiplier Low",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_mult_low, 1..=16),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Multiplier Mid",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_mult_mid, 1..=32),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Multiplier High",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_mult_high, 1..=64),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Batch Min",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_batch_min, 1..=512),
+                                );
+                                ui_setting_line(
+                                    ui,
+                                    "Adaptive Batch Max",
+                                    egui::Slider::new(&mut cfg.gpu_worldgen_adaptive_batch_max, 1..=2048),
+                                );
+                                ui.small("Higher backlog usually means larger GPU batch and wider loading windows.");
+                            });
+
                         ui.separator();
-                        ui.label("Voxel Brush:");
+                        ui.label("Video");
+                        ui_setting_line(ui, "FOV", egui::Slider::new(&mut cfg.fov, 10.0..=170.0));
+                        ui_setting_line(ui, "VSync", egui::Checkbox::new(&mut cfg.vsync, ""));
 
-                        ui_setting_line(ui, "Size", egui::Slider::new(&mut vox_brush.size, 0.0..=20.0));
-
-                        ui_setting_line(ui, "Indensity", egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0));
-
-                        // ui_setting_line(ui, "Shape", egui::Slider::new(&mut vox_brush.shape, 0..=5));
-
-                        ui_setting_line(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25));
-
-                        // 新增：示例显示第一个物品的物理属性（后续可完善为热栏/背包界面显示）
-                        if let Some(def) = items.defs.get(0) {
-                            ui.separator();
-                            ui.label(format!("物品: {}", def.name));
-                            ui.label(format!("质量: {:.3} kg", def.props.mass));
-                            ui.label(format!("体积: {:.5} m³", def.props.volume));
-                            ui.label(format!("密度: {:.1} kg/m³", def.props.density));
-                            ui.label(format!("摩尔质量: {:.2} g/mol", def.props.molar_mass));
-                        }
-
+                        ui.separator();
+                        ui.label("UI");
+                        ui_setting_line(ui, "HUD Padding", egui::Slider::new(&mut cfg.hud_padding, 0.0..=48.0));
+                        ui_setting_line(ui, "Show Level Indicator", egui::Checkbox::new(&mut cfg.show_level_indicator, ""));
+                        ui_setting_line(ui, "Show Pitch Indicator", egui::Checkbox::new(&mut cfg.show_pitch_indicator, ""));
+                    }
+                    SettingsPanel::CurrentWorld => {
+                        ui.label("World");
                         if let Some(worldinfo) = &mut worldinfo {
-                            ui.label("World:");
                             ui_setting_line(ui, "Day Time", egui::Slider::new(&mut worldinfo.daytime, 0.0..=1.0));
                             ui_setting_line(ui, "Day Time Length", egui::Slider::new(&mut worldinfo.daytime_length, 0.0..=60.0 * 24.0));
                         }
-                        
-                        ui.label("Video:");
 
-                        ui_setting_line(ui, "FOV", egui::Slider::new(&mut cfg.fov, 10.0..=170.0));
+                        ui.separator();
+                        ui.label("Voxel Brush");
+                        ui_setting_line(ui, "Size", egui::Slider::new(&mut vox_brush.size, 0.0..=20.0));
+                        ui_setting_line(ui, "Intensity", egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0));
+                        ui_setting_line(ui, "Tex", egui::Slider::new(&mut vox_brush.tex, 0..=25));
 
-                        ui_setting_line(ui, "VSync", egui::Checkbox::new(&mut cfg.vsync, ""));
-
-                        ui.label("UI");
-
-                        //ui_setting_line(ui, "UI Scale", egui::Slider::new(&mut egui_settings.scale_factor, 0.5..=2.5));
-
-                        ui_setting_line(ui, "HUD Padding", egui::Slider::new(&mut cfg.hud_padding, 0.0..=48.0));
-                        
-                        ui.label("Controls");
+                        ui.separator();
+                        ui.label("Character");
                         if let Ok(mut ctl) = query_char.single_mut() {
                             ui_setting_line(ui, "Unfly on Grounded", egui::Checkbox::new(&mut ctl.unfly_on_ground, ""));
                         }
-                    }
-                    SettingsPanel::CurrentWorld => {
+
+                        egui::CollapsingHeader::new("Item Physics Snapshot")
+                            .default_open(false)
+                            .show(ui, |ui| {
+                                if let Some(def) = items.defs.get(0) {
+                                    ui.label(format!("Item: {}", def.name));
+                                    ui.label(format!("Mass: {:.3} kg", def.props.mass));
+                                    ui.label(format!("Volume: {:.5} m³", def.props.volume));
+                                    ui.label(format!("Density: {:.1} kg/m³", def.props.density));
+                                    ui.label(format!("Molar Mass: {:.2} g/mol", def.props.molar_mass));
+                                } else {
+                                    ui.small("No item definitions loaded.");
+                                }
+                            });
                     }
                     SettingsPanel::Graphics => {
                         ui.label("Render Effects");
@@ -195,6 +393,10 @@ pub fn ui_settings(
                         ui_setting_line(ui, "Bloom", egui::Checkbox::new(&mut cli.render_bloom, ""));
                         ui_setting_line(ui, "Screen Space Reflections", egui::Checkbox::new(&mut cli.render_ssr, ""));
                         ui_setting_line(ui, "Volumetric Fog", egui::Checkbox::new(&mut cli.render_volumetric_fog, ""));
+                        ui_setting_line(ui, "Volumetric Fog Density", egui::Slider::new(&mut cli.volumetric_fog_density, 0.0..=3.0));
+                        ui_setting_line(ui, "Volumetric Fog Color R", egui::Slider::new(&mut cli.volumetric_fog_color.x, 0.0..=1.0));
+                        ui_setting_line(ui, "Volumetric Fog Color G", egui::Slider::new(&mut cli.volumetric_fog_color.y, 0.0..=1.0));
+                        ui_setting_line(ui, "Volumetric Fog Color B", egui::Slider::new(&mut cli.volumetric_fog_color.z, 0.0..=1.0));
                         ui_setting_line(ui, "Skybox + EnvMap", egui::Checkbox::new(&mut cli.render_skybox, ""));
 
                         ui.label("Lighting");
@@ -251,9 +453,11 @@ pub fn ui_settings(
                         ui.separator();
                         ui.label("Touch");
                         ui_setting_line(ui, "Layout Edit Mode", egui::Checkbox::new(&mut cli.touch_controls_edit_mode, ""));
-                        if ui.button("Undo Last Drag").clicked() {
-                            cfg.controls.touch_layout_request_undo = true;
-                        }
+                        ui_setting_line_custom(ui, "Undo Last Drag", |ui| {
+                            if ui.button("Undo").clicked() {
+                                cfg.controls.touch_layout_request_undo = true;
+                            }
+                        });
                         if cli.touch_controls_edit_mode {
                             ui.colored_label(
                                 Color32::from_rgb(255, 214, 140),
@@ -284,59 +488,86 @@ pub fn ui_settings(
                             "Button Radius",
                             egui::Slider::new(&mut cfg.controls.touch.button_radius, 30.0..=80.0),
                         );
+                        ui_setting_line(
+                            ui,
+                            "Vertical Slider Height",
+                            egui::Slider::new(&mut cfg.controls.touch.vertical_slider_height, 120.0..=320.0),
+                        );
+                        ui_setting_line(
+                            ui,
+                            "Vertical Slider Width",
+                            egui::Slider::new(&mut cfg.controls.touch.vertical_slider_width, 44.0..=96.0),
+                        );
+                        ui_setting_line(
+                            ui,
+                            "Fly Double Tap Window (sec)",
+                            egui::Slider::new(&mut cfg.controls.touch.fly_double_tap_window_secs, 0.18..=0.65),
+                        );
 
                         ui.separator();
                         ui.label("Touch Button Action Mapping");
-                        egui::ComboBox::from_label("Attack Button Action")
-                            .selected_text(format!("{:?}", cfg.controls.touch.attack_button_action))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Attack, "Attack");
-                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::UseItem, "UseItem");
-                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Jump, "Jump");
-                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sprint, "Sprint");
-                                ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sneak, "Sneak");
-                            });
-                        egui::ComboBox::from_label("Use Button Action")
-                            .selected_text(format!("{:?}", cfg.controls.touch.use_button_action))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Attack, "Attack");
-                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::UseItem, "UseItem");
-                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Jump, "Jump");
-                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sprint, "Sprint");
-                                ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sneak, "Sneak");
-                            });
-                        egui::ComboBox::from_label("Jump Button Action")
-                            .selected_text(format!("{:?}", cfg.controls.touch.jump_button_action))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Attack, "Attack");
-                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::UseItem, "UseItem");
-                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Jump, "Jump");
-                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sprint, "Sprint");
-                                ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sneak, "Sneak");
-                            });
-                        egui::ComboBox::from_label("Sprint Button Action")
-                            .selected_text(format!("{:?}", cfg.controls.touch.sprint_button_action))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Attack, "Attack");
-                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::UseItem, "UseItem");
-                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Jump, "Jump");
-                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sprint, "Sprint");
-                                ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sneak, "Sneak");
-                            });
-                        egui::ComboBox::from_label("Crouch Button Action")
-                            .selected_text(format!("{:?}", cfg.controls.touch.crouch_button_action))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Attack, "Attack");
-                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::UseItem, "UseItem");
-                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Jump, "Jump");
-                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sprint, "Sprint");
-                                ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sneak, "Sneak");
-                            });
+                        ui_setting_line_custom(ui, "Attack Button Action", |ui| {
+                            egui::ComboBox::from_id_source("touch_attack_action")
+                                .selected_text(format!("{:?}", cfg.controls.touch.attack_button_action))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Attack, "Attack");
+                                    ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::UseItem, "UseItem");
+                                    ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Jump, "Jump");
+                                    ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sprint, "Sprint");
+                                    ui.selectable_value(&mut cfg.controls.touch.attack_button_action, TouchActionBinding::Sneak, "Sneak");
+                                });
+                        });
+                        ui_setting_line_custom(ui, "Use Button Action", |ui| {
+                            egui::ComboBox::from_id_source("touch_use_action")
+                                .selected_text(format!("{:?}", cfg.controls.touch.use_button_action))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Attack, "Attack");
+                                    ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::UseItem, "UseItem");
+                                    ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Jump, "Jump");
+                                    ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sprint, "Sprint");
+                                    ui.selectable_value(&mut cfg.controls.touch.use_button_action, TouchActionBinding::Sneak, "Sneak");
+                                });
+                        });
+                        ui_setting_line_custom(ui, "Jump Button Action", |ui| {
+                            egui::ComboBox::from_id_source("touch_jump_action")
+                                .selected_text(format!("{:?}", cfg.controls.touch.jump_button_action))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Attack, "Attack");
+                                    ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::UseItem, "UseItem");
+                                    ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Jump, "Jump");
+                                    ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sprint, "Sprint");
+                                    ui.selectable_value(&mut cfg.controls.touch.jump_button_action, TouchActionBinding::Sneak, "Sneak");
+                                });
+                        });
+                        ui_setting_line_custom(ui, "Sprint Button Action", |ui| {
+                            egui::ComboBox::from_id_source("touch_sprint_action")
+                                .selected_text(format!("{:?}", cfg.controls.touch.sprint_button_action))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Attack, "Attack");
+                                    ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::UseItem, "UseItem");
+                                    ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Jump, "Jump");
+                                    ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sprint, "Sprint");
+                                    ui.selectable_value(&mut cfg.controls.touch.sprint_button_action, TouchActionBinding::Sneak, "Sneak");
+                                });
+                        });
+                        ui_setting_line_custom(ui, "Crouch Button Action", |ui| {
+                            egui::ComboBox::from_id_source("touch_crouch_action")
+                                .selected_text(format!("{:?}", cfg.controls.touch.crouch_button_action))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Attack, "Attack");
+                                    ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::UseItem, "UseItem");
+                                    ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Jump, "Jump");
+                                    ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sprint, "Sprint");
+                                    ui.selectable_value(&mut cfg.controls.touch.crouch_button_action, TouchActionBinding::Sneak, "Sneak");
+                                });
+                        });
 
-                        if ui.button("Reset Touch Layout").clicked() {
-                            cfg.controls.touch = Default::default();
-                            cli.touch_controls_edit_mode = false;
-                        }
+                        ui_setting_line_custom(ui, "Reset Touch Layout", |ui| {
+                            if ui.button("Reset").clicked() {
+                                cfg.controls.touch = Default::default();
+                                cli.touch_controls_edit_mode = false;
+                            }
+                        });
 
                         ui.separator();
                         ui.label("Touch Layout Presets");
@@ -345,21 +576,23 @@ pub fn ui_settings(
                             "Preset Name",
                             egui::TextEdit::singleline(&mut cfg.controls.touch_layout_preset_name),
                         );
-                        if ui.button("Save Current Layout As Preset").clicked() {
-                            let mut name = cfg.controls.touch_layout_preset_name.trim().to_string();
-                            let current_layout = cfg.controls.touch.clone();
-                            if name.is_empty() {
-                                name = format!("Preset {}", cfg.controls.touch_layout_presets.len() + 1);
+                        ui_setting_line_custom(ui, "Save Current Layout As Preset", |ui| {
+                            if ui.button("Save").clicked() {
+                                let mut name = cfg.controls.touch_layout_preset_name.trim().to_string();
+                                let current_layout = cfg.controls.touch.clone();
+                                if name.is_empty() {
+                                    name = format!("Preset {}", cfg.controls.touch_layout_presets.len() + 1);
+                                }
+                                if let Some(existing) = cfg.controls.touch_layout_presets.iter_mut().find(|p| p.name == name) {
+                                    existing.layout = current_layout;
+                                } else {
+                                    cfg.controls.touch_layout_presets.push(crate::client::settings::TouchLayoutPreset {
+                                        name,
+                                        layout: current_layout,
+                                    });
+                                }
                             }
-                            if let Some(existing) = cfg.controls.touch_layout_presets.iter_mut().find(|p| p.name == name) {
-                                existing.layout = current_layout;
-                            } else {
-                                cfg.controls.touch_layout_presets.push(crate::client::settings::TouchLayoutPreset {
-                                    name,
-                                    layout: current_layout,
-                                });
-                            }
-                        }
+                        });
 
                         let mut remove_idx: Option<usize> = None;
                         let preset_rows = cfg

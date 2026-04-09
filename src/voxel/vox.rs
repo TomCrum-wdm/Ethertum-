@@ -85,7 +85,7 @@ impl Vox {
 // VoxShape
 
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize, Default, Reflect)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Default, Reflect)]
 pub enum VoxShape {
     #[default]
     Isosurface,

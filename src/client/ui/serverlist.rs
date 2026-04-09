@@ -309,7 +309,7 @@ pub fn ui_localsaves(
         let local_world_supported = serv_cfg.is_some() || cfg!(target_arch = "wasm32");
         let mut do_refresh = false;
         let mut do_delete: Option<String> = None;
-        let mut do_play: Option<(String, u64)> = None;
+        let mut do_play: Option<crate::voxel::WorldMeta> = None;
 
         if !local_world_supported {
             ui.colored_label(Color32::YELLOW, "Local worlds are unavailable on this platform/runtime.");
@@ -343,6 +343,11 @@ pub fn ui_localsaves(
 
                 for world in worlds.iter() {
                     ui.group(|ui| {
+                        let terrain_label = match world.config.terrain_mode {
+                            crate::voxel::WorldTerrainMode::Planet => "Spherical",
+                            crate::voxel::WorldTerrainMode::Flat => "Flat",
+                            crate::voxel::WorldTerrainMode::SuperFlat => "SuperFlat",
+                        };
                         ui.horizontal(|ui| {
                             ui.colored_label(Color32::WHITE, &world.name);
                             ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
@@ -351,14 +356,23 @@ pub fn ui_localsaves(
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("Persistent local world");
+                            ui.label(format!("{} · Persistent local world", terrain_label));
                             ui.with_layout(Layout::right_to_left(egui::Align::Max), |ui| {
                                 if local_world_supported {
                                     if ui.btn("🗑").on_hover_text("Delete world").clicked() {
                                         do_delete = Some(world.name.clone());
                                     }
                                     if ui.btn("▶").on_hover_text("Play world").clicked() {
-                                        do_play = Some((world.name.clone(), world.seed));
+                                        do_play = Some(crate::voxel::WorldMeta {
+                                            schema_version: world.schema_version,
+                                            name: world.name.clone(),
+                                            seed: world.seed,
+                                            created: 0,
+                                            last_played: world.last_played,
+                                            config: world.config.clone(),
+                                            owner_username: None,
+                                            admin_usernames: Vec::new(),
+                                        });
                                     }
                                 } else {
                                     if ui.btn("🗑").on_hover_text("Delete world").clicked() {
@@ -405,11 +419,22 @@ pub fn ui_localsaves(
             }
         }
 
-        if let Some((name, seed)) = do_play {
+        if let Some(mut meta) = do_play {
+            if meta.schema_version == 0 {
+                match crate::voxel::migrate_world_meta(&meta.name, cli.cfg.terrain_mode) {
+                    Ok(migrated) => {
+                        meta = migrated;
+                    }
+                    Err(err) => {
+                        *last_error = err.to_string();
+                        return;
+                    }
+                }
+            }
             if cfg!(target_arch = "wasm32") {
-                cli.connect_local_world(name, seed, 0);
+                cli.connect_local_world(meta, 0);
             } else if let Some(serv_cfg) = &serv_cfg {
-                cli.connect_local_world(name, seed, serv_cfg.port);
+                cli.connect_local_world(meta, serv_cfg.port);
             } else {
                 *last_error = "Integrated server unavailable on this runtime".to_string();
             }
@@ -417,12 +442,102 @@ pub fn ui_localsaves(
     });
 }
 
-#[derive(Default, Debug, PartialEq)]
-pub enum Difficulty {
-    Peace,
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeedInputMode {
+    Number,
+    Hex,
     #[default]
-    Normal,
-    Hard,
+    Text,
+    Random,
+    WorldNameHash,
+    Daily,
+    NameAndText,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OptionTag {
+    Performance,
+    Fun,
+    Dangerous,
+}
+
+impl OptionTag {
+    fn color(self) -> Color32 {
+        match self {
+            OptionTag::Performance => Color32::from_rgb(70, 140, 255),
+            OptionTag::Fun => Color32::from_rgb(180, 90, 255),
+            OptionTag::Dangerous => Color32::from_rgb(255, 70, 70),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            OptionTag::Performance => "Performance",
+            OptionTag::Fun => "Fun",
+            OptionTag::Dangerous => "Dangerous",
+        }
+    }
+}
+
+fn ui_option_row(ui: &mut egui::Ui, label: &str, tags: &[OptionTag], add_widget: impl FnOnce(&mut egui::Ui)) {
+    ui.horizontal(|ui| {
+        for (idx, tag) in tags.iter().enumerate() {
+            let (strip_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, 22.0), egui::Sense::hover());
+            ui.painter().rect_filled(strip_rect, 1.0, tag.color());
+            if idx + 1 < tags.len() {
+                ui.add_space(2.0);
+            }
+        }
+        ui.add_space(8.0);
+        ui.label(label);
+        add_widget(ui);
+    });
+}
+
+fn next_random_seed(seed_source: &str) -> u64 {
+    crate::util::hashcode(&format!("{}:{}", seed_source, crate::util::current_timestamp_millis()))
+}
+
+fn parse_hex_seed(seed_text: &str) -> Option<u64> {
+    let trimmed = seed_text.trim();
+    let raw = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    if raw.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(raw, 16).ok()
+}
+
+fn daily_seed() -> u64 {
+    let day = crate::util::current_timestamp().as_secs() / 86_400;
+    crate::util::hashcode(&format!("daily:{day}"))
+}
+
+fn resolve_seed(final_name: &str, seed_text: &str, mode: SeedInputMode, random_seed: u64) -> u64 {
+    let text = seed_text.trim();
+    match mode {
+        SeedInputMode::Number => text.parse::<u64>().unwrap_or_else(|_| crate::util::hashcode(final_name)),
+        SeedInputMode::Hex => parse_hex_seed(text).unwrap_or_else(|| crate::util::hashcode(final_name)),
+        SeedInputMode::Text => {
+            if text.is_empty() {
+                crate::util::hashcode(final_name)
+            } else {
+                crate::util::hashcode(text)
+            }
+        }
+        SeedInputMode::Random => random_seed.max(1),
+        SeedInputMode::WorldNameHash => crate::util::hashcode(final_name),
+        SeedInputMode::Daily => daily_seed(),
+        SeedInputMode::NameAndText => {
+            if text.is_empty() {
+                crate::util::hashcode(&format!("{}:default", final_name))
+            } else {
+                crate::util::hashcode(&format!("{}:{}", final_name, text))
+            }
+        }
+    }
 }
 
 pub fn ui_create_world(
@@ -431,7 +546,11 @@ pub fn ui_create_world(
     serv_cfg: Option<Res<ServerSettings>>,
     mut tx_world_name: Local<String>,
     mut tx_world_seed: Local<String>,
-    mut _difficulty: Local<Difficulty>,
+    mut seed_mode: Local<SeedInputMode>,
+    mut random_seed: Local<u64>,
+    mut world_config: Local<crate::voxel::WorldGenConfig>,
+    mut advanced_open: Local<bool>,
+    mut initialized: Local<bool>,
     mut create_error: Local<String>,
 ) {
     let Ok(ctx_mut) = ctx.ctx_mut() else {
@@ -439,54 +558,249 @@ pub fn ui_create_world(
     };
     let local_play_supported = serv_cfg.is_some() || cfg!(target_arch = "wasm32");
 
+    if !*initialized {
+        *world_config = crate::voxel::WorldGenConfig::default();
+        world_config.terrain_mode = cli.cfg.terrain_mode;
+        if tx_world_name.trim().is_empty() {
+            *tx_world_name = format!("world_{}", crate::util::current_timestamp_millis());
+        }
+        *random_seed = next_random_seed(tx_world_name.as_str());
+        *initialized = true;
+    }
+
     new_egui_window("New World").show(ctx_mut, |ui| {
-        // ui_lr_panel(ui, true, |ui| {
-        //     if sfx_play(ui.selectable_label(true, "General")).clicked() {
-
-        //     }
-        //     if sfx_play(ui.selectable_label(false, "Generation")).clicked() {
-
-        //     }
-        //     if sfx_play(ui.selectable_label(false, "Gamerules")).clicked() {
-
-        //     }
-        // }, |ui| {
         let space = 14.;
+        let final_name = if tx_world_name.trim().is_empty() {
+            format!("world_{}", crate::util::current_timestamp_millis())
+        } else {
+            tx_world_name.trim().to_string()
+        };
 
-        ui.label("Name:");
-        sfx_play(ui.text_edit_singleline(&mut *tx_world_name));
-        ui.add_space(space);
+        if *seed_mode == SeedInputMode::Random && *random_seed == 0 {
+            *random_seed = next_random_seed(&final_name);
+        }
 
-        ui.label("Seed:");
-        sfx_play(ui.text_edit_singleline(&mut *tx_world_seed));
-        ui.add_space(space);
+        let resolved_seed = resolve_seed(&final_name, tx_world_seed.as_str(), *seed_mode, *random_seed);
 
-        ui.label("Gamemode:");
-        ui.horizontal(|ui| {
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Peace, "Survival"));
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Normal, "Creative"));
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Hard, "Spectator"));
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Legend:");
+            for tag in [OptionTag::Performance, OptionTag::Fun, OptionTag::Dangerous] {
+                ui.colored_label(tag.color(), format!("| {}", tag.label()));
+            }
+        });
+        ui.small("One option may have multiple tags. Multiple bars mean mixed traits.");
+        ui.small("Dangerous options can dramatically change generation style or compatibility.");
+        ui.add_space(8.0);
+
+        ui_option_row(ui, "Name:", &[OptionTag::Fun], |ui| {
+            sfx_play(ui.text_edit_singleline(&mut *tx_world_name));
         });
         ui.add_space(space);
 
-        ui.label("Difficulty:");
-        ui.horizontal(|ui| {
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Peace, "Peace"));
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Normal, "Normal"));
-            sfx_play(ui.radio_value(&mut *_difficulty, Difficulty::Hard, "Hard"));
+        ui_option_row(ui, "World Type:", &[OptionTag::Fun, OptionTag::Dangerous], |ui| {
+            let is_planet = world_config.terrain_mode == crate::voxel::WorldTerrainMode::Planet;
+            let is_flat = world_config.terrain_mode == crate::voxel::WorldTerrainMode::Flat;
+            let is_superflat = world_config.terrain_mode == crate::voxel::WorldTerrainMode::SuperFlat;
+
+            if sfx_play(ui.radio(is_planet, "Spherical Planet")).clicked() {
+                world_config.terrain_mode = crate::voxel::WorldTerrainMode::Planet;
+                cli.cfg.terrain_mode = crate::voxel::WorldTerrainMode::Planet;
+            }
+            if sfx_play(ui.radio(is_flat, "Flat World")).clicked() {
+                world_config.terrain_mode = crate::voxel::WorldTerrainMode::Flat;
+                cli.cfg.terrain_mode = crate::voxel::WorldTerrainMode::Flat;
+            }
+            if sfx_play(ui.radio(is_superflat, "SuperFlat World")).clicked() {
+                world_config.terrain_mode = crate::voxel::WorldTerrainMode::SuperFlat;
+                cli.cfg.terrain_mode = crate::voxel::WorldTerrainMode::SuperFlat;
+            }
         });
         ui.add_space(space);
 
-        ui.label("Difficulty:");
-        egui::ComboBox::from_id_source("Difficulty")
-            .selected_text(format!("{:?}", *_difficulty))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut *_difficulty, Difficulty::Peace, "Peace");
-                ui.selectable_value(&mut *_difficulty, Difficulty::Normal, "Normal");
-                ui.selectable_value(&mut *_difficulty, Difficulty::Hard, "Hard");
+        ui_option_row(ui, "Seed Mode:", &[OptionTag::Fun], |ui| {
+            egui::ComboBox::from_id_source("world_seed_mode")
+                .selected_text(match *seed_mode {
+                    SeedInputMode::Number => "Numeric (u64)",
+                    SeedInputMode::Hex => "Hexadecimal (u64)",
+                    SeedInputMode::Text => "Text Hash",
+                    SeedInputMode::Random => "Random",
+                    SeedInputMode::WorldNameHash => "World Name Hash",
+                    SeedInputMode::Daily => "Daily Seed",
+                    SeedInputMode::NameAndText => "Name + Text Hash",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::Number, "Numeric (u64)");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::Hex, "Hexadecimal (u64)");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::Text, "Text Hash");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::Random, "Random");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::WorldNameHash, "World Name Hash");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::Daily, "Daily Seed");
+                    ui.selectable_value(&mut *seed_mode, SeedInputMode::NameAndText, "Name + Text Hash");
+                });
+        });
+
+        match *seed_mode {
+            SeedInputMode::Number => {
+                ui_option_row(ui, "Seed Number (u64):", &[OptionTag::Fun], |ui| {
+                    sfx_play(ui.text_edit_singleline(&mut *tx_world_seed));
+                });
+                ui.small("Use a decimal integer. Empty or invalid values fall back to world-name hashing.\n");
+            }
+            SeedInputMode::Hex => {
+                ui_option_row(ui, "Seed Hex (u64):", &[OptionTag::Fun], |ui| {
+                    sfx_play(ui.text_edit_singleline(&mut *tx_world_seed));
+                });
+                ui.small("Supports forms like 0x1A2B or 1A2B. Empty or invalid values fall back to world-name hashing.\n");
+            }
+            SeedInputMode::Text => {
+                ui_option_row(ui, "Seed Text:", &[OptionTag::Fun], |ui| {
+                    sfx_play(ui.text_edit_singleline(&mut *tx_world_seed));
+                });
+                ui.small("Text is hashed into a reproducible u64 seed. Empty text falls back to world-name hashing.\n");
+            }
+            SeedInputMode::Random => {
+                ui_option_row(ui, "Random Seed:", &[OptionTag::Fun], |ui| {
+                    ui.label(format!("Random Seed: {}", *random_seed));
+                    if sfx_play(ui.button("Regenerate")).clicked() {
+                        *random_seed = next_random_seed(&final_name);
+                    }
+                });
+                ui.small("A random seed is generated once and stays stable until you regenerate it.\n");
+            }
+            SeedInputMode::WorldNameHash => {
+                ui.label(format!("World Name Hash Seed: {}", crate::util::hashcode(&final_name)));
+                ui.small("Seed is derived only from the world name. Renaming the world changes the seed.\n");
+            }
+            SeedInputMode::Daily => {
+                let day = crate::util::current_timestamp().as_secs() / 86_400;
+                ui.label(format!("Daily Seed: {}", daily_seed()));
+                ui.small(format!("Daily seed rotates once per UTC day (day bucket: {}).\n", day));
+            }
+            SeedInputMode::NameAndText => {
+                ui_option_row(ui, "Seed Text (combined with world name):", &[OptionTag::Fun], |ui| {
+                    sfx_play(ui.text_edit_singleline(&mut *tx_world_seed));
+                });
+                ui.small("Seed is hashed from world name + text. Useful for themed variants under the same world name.\n");
+            }
+        }
+        ui.colored_label(Color32::LIGHT_GREEN, format!("Resolved Seed: {}", resolved_seed));
+        ui.small(format!(
+            "Selected terrain: {}",
+            match world_config.terrain_mode {
+                crate::voxel::WorldTerrainMode::Planet => "Spherical Planet",
+                crate::voxel::WorldTerrainMode::Flat => "Flat World",
+                crate::voxel::WorldTerrainMode::SuperFlat => "SuperFlat World",
+            }
+        ));
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new("Advanced Generation Parameters")
+            .default_open(*advanced_open)
+            .show(ui, |ui| {
+                ui.label("General Parameters:");
+
+                let mut oct = world_config.fbm_octaves as i32;
+                if ui
+                    .add(egui::Slider::new(&mut oct, 1..=12).text("FBM Octaves"))
+                    .changed()
+                {
+                    world_config.fbm_octaves = oct as u8;
+                }
+
+                ui_option_row(ui, "Noise Scale 2D", &[OptionTag::Performance, OptionTag::Dangerous], |ui| {
+                    ui.add(egui::Slider::new(&mut world_config.noise_scale_2d, 8.0..=2048.0));
+                });
+                ui_option_row(ui, "Noise Scale 3D", &[OptionTag::Performance, OptionTag::Dangerous], |ui| {
+                    ui.add(egui::Slider::new(&mut world_config.noise_scale_3d, 8.0..=2048.0));
+                });
+                ui_option_row(ui, "Gravity (m/s²)", &[OptionTag::Fun, OptionTag::Dangerous], |ui| {
+                    ui.add(egui::Slider::new(&mut world_config.gravity_acceleration, 0.0..=60.0));
+                });
+                ui_option_row(ui, "Spawn Surface Offset", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                    ui.add(egui::Slider::new(&mut world_config.spawn_surface_offset, 0.0..=128.0));
+                });
+                ui_option_row(ui, "Generation Backend", &[OptionTag::Performance, OptionTag::Dangerous], |ui| {
+                    egui::ComboBox::from_id_source("world_gen_backend_pref")
+                        .selected_text(match world_config.worldgen_backend {
+                            crate::voxel::WorldGenBackendPreference::Auto => "Auto (Follow Client Setting)",
+                            crate::voxel::WorldGenBackendPreference::CpuCompatible => "CPU Compatible (Stable Shape)",
+                            crate::voxel::WorldGenBackendPreference::GpuFast => "GPU Fast (May Differ)",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut world_config.worldgen_backend,
+                                crate::voxel::WorldGenBackendPreference::Auto,
+                                "Auto (Follow Client Setting)",
+                            );
+                            ui.selectable_value(
+                                &mut world_config.worldgen_backend,
+                                crate::voxel::WorldGenBackendPreference::CpuCompatible,
+                                "CPU Compatible (Stable Shape)",
+                            );
+                            ui.selectable_value(
+                                &mut world_config.worldgen_backend,
+                                crate::voxel::WorldGenBackendPreference::GpuFast,
+                                "GPU Fast (May Differ)",
+                            );
+                        });
+                });
+
+                egui::CollapsingHeader::new("Flat World Parameters")
+                    .default_open(world_config.terrain_mode == crate::voxel::WorldTerrainMode::Flat)
+                    .show(ui, |ui| {
+                        ui_option_row(ui, "Height Divisor", &[OptionTag::Performance, OptionTag::Fun], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.flat_height_divisor, 1.0..=128.0));
+                        });
+                        ui_option_row(ui, "3D Noise Strength", &[OptionTag::Fun, OptionTag::Performance], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.flat_3d_noise_strength, 0.0..=16.0));
+                        });
+                        ui_option_row(ui, "Water Level (Y)", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.flat_water_level, -128..=128));
+                        });
+                    });
+
+                egui::CollapsingHeader::new("SuperFlat Parameters")
+                    .default_open(world_config.terrain_mode == crate::voxel::WorldTerrainMode::SuperFlat)
+                    .show(ui, |ui| {
+                        ui_option_row(ui, "Ground Level (Y)", &[OptionTag::Fun, OptionTag::Dangerous], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.superflat_ground_level, -128..=256));
+                        });
+                        ui_option_row(ui, "Dirt Depth", &[OptionTag::Fun, OptionTag::Performance], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.superflat_dirt_depth, 1..=16));
+                        });
+                        ui_option_row(ui, "Water Level (Y)", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.superflat_water_level, -256..=256));
+                        });
+                        ui_option_row(ui, "Generate Trees", &[OptionTag::Fun], |ui| {
+                            ui.checkbox(&mut world_config.superflat_generate_trees, "");
+                        });
+                    });
+
+                egui::CollapsingHeader::new("Planet Parameters")
+                    .default_open(world_config.terrain_mode == crate::voxel::WorldTerrainMode::Planet)
+                    .show(ui, |ui| {
+                        ui_option_row(ui, "Planet Radius", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.planet_radius, 32.0..=20_000.0).text("Radius"));
+                            if sfx_play(ui.button("Default")).clicked() {
+                                world_config.planet_radius = crate::voxel::WorldGenConfig::default().planet_radius;
+                            }
+                        });
+                        ui_option_row(ui, "Planet Center", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                            ui.add(egui::DragValue::new(&mut world_config.planet_center.x).speed(1.0).prefix("x="));
+                            ui.add(egui::DragValue::new(&mut world_config.planet_center.y).speed(1.0).prefix("y="));
+                            ui.add(egui::DragValue::new(&mut world_config.planet_center.z).speed(1.0).prefix("z="));
+                        });
+                        ui_option_row(ui, "Shell Thickness", &[OptionTag::Performance, OptionTag::Dangerous], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.planet_shell_thickness, 8.0..=512.0));
+                        });
+                        ui_option_row(ui, "Planet 3D Noise Strength", &[OptionTag::Fun, OptionTag::Performance], |ui| {
+                            ui.add(egui::Slider::new(&mut world_config.planet_3d_noise_strength, 0.0..=8.0));
+                        });
+                        ui_option_row(ui, "Planet Inner Water", &[OptionTag::Dangerous, OptionTag::Fun], |ui| {
+                            ui.checkbox(&mut world_config.planet_inner_water, "");
+                        });
+                    });
             });
-
-        ui.add_space(space);
 
         ui.add_space(22.);
 
@@ -495,19 +809,11 @@ pub fn ui_create_world(
             ui.add_space(6.0);
         }
 
+        let mut sanitized_config = (*world_config).clone();
+        sanitized_config.sanitize();
+
         if sfx_play(ui.add_sized([290., 26.], egui::Button::new("Create World").fill(Color32::DARK_GREEN))).clicked() {
-            let final_name = if tx_world_name.trim().is_empty() {
-                format!("world_{}", crate::util::current_timestamp_millis())
-            } else {
-                tx_world_name.trim().to_string()
-            };
-
-            let seed = tx_world_seed
-                .trim()
-                .parse::<u64>()
-                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
-
-            match crate::voxel::create_world(&final_name, seed) {
+            match crate::voxel::create_world_with_config(&final_name, resolved_seed, sanitized_config.clone()) {
                 Ok(_) => {
                     create_error.clear();
                     cli.data().curr_ui = CurrentUI::LocalWorldList;
@@ -529,24 +835,13 @@ pub fn ui_create_world(
             ui.small("Create & Play is unavailable on this runtime.");
         }
         if create_and_play_clicked {
-            let final_name = if tx_world_name.trim().is_empty() {
-                format!("world_{}", crate::util::current_timestamp_millis())
-            } else {
-                tx_world_name.trim().to_string()
-            };
-
-            let seed = tx_world_seed
-                .trim()
-                .parse::<u64>()
-                .unwrap_or_else(|_| crate::util::hashcode(&final_name));
-
-            match crate::voxel::create_world(&final_name, seed) {
+            match crate::voxel::create_world_with_config(&final_name, resolved_seed, sanitized_config.clone()) {
                 Ok(meta) => {
                     create_error.clear();
                     if cfg!(target_arch = "wasm32") {
-                        cli.connect_local_world(meta.name, meta.seed, 0);
+                        cli.connect_local_world(meta, 0);
                     } else if let Some(serv_cfg) = &serv_cfg {
-                        cli.connect_local_world(meta.name, meta.seed, serv_cfg.port);
+                        cli.connect_local_world(meta, serv_cfg.port);
                     } else {
                         *create_error = "Integrated server unavailable on this runtime".to_string();
                     }
@@ -561,6 +856,5 @@ pub fn ui_create_world(
         if sfx_play(ui.add_sized([290., 20.], egui::Button::new("Cancel"))).clicked() {
             cli.data().curr_ui = CurrentUI::LocalWorldList;
         }
-        // });
     });
 }
