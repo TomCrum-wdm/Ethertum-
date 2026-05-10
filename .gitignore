@@ -14,3 +14,7 @@ device_log.txt
 /__tmp_*
 /ethertia-main.bundle
 *known_hosts
+
+# 忽略保存目录
+/saves/
+/save/

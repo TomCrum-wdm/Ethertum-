@@ -3,6 +3,7 @@ mod ddgi;
 
 pub mod character_controller;
 pub mod game_client;
+pub mod l10n;
 pub mod ui;
 
 mod client_world;
@@ -22,6 +23,7 @@ pub mod prelude {
         EditorViewMode, EditorViewportCamera, EditorViewportRttState, EthertiaClient,
     };
     pub use input::{InputAction, TouchButtonState, TouchStickState};
+    pub use l10n::LanguageOption;
     pub use settings::{ClientSettings, ServerListItem, TouchActionBinding};
     pub use ui::{CurrentUI, UiExtra};
 

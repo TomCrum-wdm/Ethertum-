@@ -5,7 +5,10 @@ mod main_menu;
 pub mod serverlist;
 mod settings;
 
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::{LazyLock, Mutex}};
+
+static UI_WINDOW_MAXIMIZED: LazyLock<Mutex<HashMap<String, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub mod prelude {
     pub use super::items::{ui_inventory, ui_item_stack};
@@ -33,6 +36,7 @@ use egui_extras::{Size, StripBuilder};
 use rand::Rng;
 
 use crate::client::prelude::*;
+use crate::client::l10n;
 
 pub struct UiPlugin;
 
@@ -63,6 +67,8 @@ impl Plugin for UiPlugin {
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
             .add_systems(Update, sync_camera_render_effects_system)
+            .add_systems(Update, sync_l10n_language_system)
+            .add_systems(Update, refresh_fonts_on_language_change)
             .add_systems(Update, items::flush_inventory_ui_ops.run_if(condition::in_world))
             .add_systems(
                 EguiPrimaryContextPass,
@@ -95,6 +101,7 @@ impl Plugin for UiPlugin {
                         main_menu::ui_pause_menu.run_if(condition::in_ui(CurrentUI::PauseMenu)),
                         // Menus
                         main_menu::ui_main_menu.run_if(condition::in_ui(CurrentUI::MainMenu)),
+                        settings::ui_touch_tile_style_overlay.run_if(|cli: Res<ClientInfo>| cli.curr_ui == CurrentUI::MainMenu || cli.curr_ui == CurrentUI::Settings),
                         serverlist::ui_localsaves.run_if(condition::in_ui(CurrentUI::LocalWorldList)),
                         serverlist::ui_create_world.run_if(condition::in_ui(CurrentUI::LocalWorldNew)),
                         serverlist::ui_serverlist.run_if(condition::in_ui(CurrentUI::ServerList)),
@@ -212,6 +219,12 @@ pub fn set_window_size(size: Vec2) {
     }
 }
 
+#[derive(Default)]
+struct WindowResizeTracker {
+    resizing: bool,
+    last_size: Option<Vec2>,
+}
+
 pub fn set_ui_safe_top(v: f32) {
     if let Ok(mut top) = UI_SAFE_TOP.lock() {
         *top = v.max(0.0);
@@ -226,35 +239,93 @@ pub fn ui_safe_top() -> f32 {
     }
 }
 
-pub fn new_egui_window(title: &str) -> egui::Window {
-    let size = [680., 420.];
+pub(crate) struct UiWindow<'a> {
+    window: egui::Window<'a>,
+    title: &'a str,
+}
 
-    let mut w = egui::Window::new(title)
-        .default_size(size)
-        .resizable(true)
-        .title_bar(false)
-        .anchor(Align2::CENTER_CENTER, [0., 0.])
-        .collapsible(false);
+pub(crate) fn new_egui_window(title: &str) -> UiWindow<'_> {
+    UiWindow {
+        window: egui::Window::new(title),
+        title,
+    }
+}
 
-    let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
+impl<'a> UiWindow<'a> {
+    pub fn anchor(mut self, anchor: Align2, offset: impl Into<egui::Vec2>) -> Self {
+        self.window = self.window.anchor(anchor, offset);
+        self
+    }
 
-    if cfg!(target_os = "android") {
-        let safe_top = ui_safe_top();
-        let width = window_size.x.max(320.0);
-        let height = (window_size.y - safe_top).max(220.0);
-        return egui::Window::new(title)
-            .fixed_size([width, height])
+    pub fn show(self, ctx: &egui::Context, add_contents: impl FnOnce(&mut egui::Ui)) -> Option<egui::InnerResponse<Option<()>>> {
+        let title = self.title;
+        let window_size = UI_WINDOW_SIZE.lock().map(|v| *v).unwrap_or(Vec2::ZERO);
+        let window_margin = 16.0;
+        let title_bar_margin = 28.0;
+
+        let maximized = UI_WINDOW_MAXIMIZED
+            .lock()
+            .ok()
+            .and_then(|store| store.get(title).copied())
+            .unwrap_or(false);
+        let window_id = egui::Id::new((title, maximized));
+
+        let mut window = self.window
+            .id(window_id)
+            .default_size([680., 420.])
+            .resizable(true)
             .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(Align2::LEFT_TOP, [0., safe_top]);
-    }
+            .collapsible(false);
 
-    if window_size.x - size[0] < 100. || window_size.y - size[1] < 100. {
-        w = w.fixed_size([window_size.x - 12., window_size.y - 12.]).resizable(false);
-    }
+        if cfg!(target_os = "android") {
+            let safe_top = ui_safe_top();
+            let width = (window_size.x - window_margin).max(320.0);
+            let height = (window_size.y - safe_top - window_margin).max(220.0);
+            window = window
+                .fixed_rect(egui::Rect::from_min_size(
+                    egui::pos2(0.0, safe_top),
+                    egui::vec2(width, height),
+                ))
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(Align2::LEFT_TOP, [0., safe_top]);
+        } else if maximized {
+            let width = (window_size.x - window_margin).max(320.0);
+            let height = (window_size.y - window_margin).max(240.0);
+            window = window
+                .fixed_rect(egui::Rect::from_min_size(
+                    egui::pos2(window_margin * 0.5, window_margin * 0.5),
+                    egui::vec2(width, height),
+                ))
+                .resizable(false)
+                .anchor(Align2::LEFT_TOP, [window_margin * 0.5, window_margin * 0.5]);
+        } else if window_size.x - 680. < 100. || window_size.y - 420. < 100. {
+            let width = (window_size.x - window_margin).max(320.0);
+            let height = (window_size.y - window_margin - title_bar_margin).max(240.0);
+            window = window.fixed_size([width, height]).resizable(false);
+        }
 
-    w
+        window.show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.strong(title);
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    if cfg!(not(target_os = "android")) {
+                        let maximize_label = if maximized { l10n::tr("Restore") } else { l10n::tr("Maximize") };
+                        let toggle_clicked = ui.button(maximize_label).on_hover_text(l10n::tr("Toggle maximize")).clicked();
+                        if toggle_clicked {
+                            if let Ok(mut map) = UI_WINDOW_MAXIMIZED.lock() {
+                                let entry = map.entry(title.to_string()).or_insert(false);
+                                *entry = !*entry;
+                            }
+                        }
+                    }
+                });
+            });
+            ui.separator();
+            add_contents(ui);
+        })
+    }
 }
 
 pub fn color32_of(c: Srgba) -> Color32 {
@@ -290,129 +361,22 @@ fn ensure_world_camera_system(
 }
 
 fn spawn_main_camera(commands: &mut Commands, asset_server: &AssetServer, cli: &ClientInfo) {
-    // WARNING: 不应该产生多个Camera 否则SSR不支持 很多东西也会非预期的绘制多次如gizmos
-    // commands.spawn((
-    //     Camera2d::default(),
-    //     Camera {
-    //         order: 10,
-    //         hdr: true,  // Sync with Camera3d!
-    //         ..default()
-    //     }
-    // ));
+    // Spawn a minimal fallback Camera for menus/UI only. Heavy world resources
+    // (cubemap skybox, envmap) are created when a world loads in
+    // `client_world::on_world_init` to avoid loading GPU-heavy textures while in menus.
+    let mut camera_entity = commands.spawn((
+        Camera3d::default(),
+        Camera {
+            order: 0,
+            ..default()
+        },
+        CharacterControllerCamera,
+        Name::new("Camera"),
+        Msaa::Off,
+    ));
 
-    #[cfg(not(target_os = "android"))]
-    {
-        // NOTE: 也许应该放在通用系统里初始化camera而不是ui里, 但毕竟依赖egui的初始化时序 先暂时放这吧
-        let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
-        commands.insert_resource(crate::client::client_world::SkyboxCubemap {
-            is_loaded: false,
-            image_handle: skybox_image.clone(),
-        });
-
-        // Desktop-quality path
-        let mut camera_entity = commands.spawn((
-            Camera3d::default(),
-            Camera {
-                order: 0,
-                ..default()
-            },
-            bevy::render::view::Hdr,
-            bevy::core_pipeline::prepass::DepthPrepass,
-            bevy::core_pipeline::prepass::DeferredPrepass,
-            bevy::core_pipeline::prepass::NormalPrepass,
-            DistanceFog {
-                ..default()
-            },
-            Skybox {
-                image: skybox_image.clone(),
-                brightness: 1000.0,
-                ..Default::default()
-            },
-            EnvironmentMapLight {
-                diffuse_map: skybox_image.clone(),
-                specular_map: skybox_image.clone(),
-                intensity: 1000.0,
-                ..Default::default()
-            },
-            CharacterControllerCamera,
-            Name::new("Camera"),
-            Msaa::Off,
-        ));
-
-        camera_entity
-            .insert(ScreenSpaceReflections::default())
-            .insert(Fxaa::default())
-            .insert(Tonemapping::TonyMcMapface)
-            .insert(Bloom::default())
-            .insert(bevy::light::VolumetricFog {
-                ambient_color: Color::linear_rgb(
-                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
-                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
-                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
-                ),
-                ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
-                    cli.volumetric_fog_density,
-                ),
-                ..default()
-            });
-    }
-
-    #[cfg(target_os = "android")]
-    {
-        // Android path: keep deferred features aligned with material shaders.
-        let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
-        commands.insert_resource(crate::client::client_world::SkyboxCubemap {
-            is_loaded: false,
-            image_handle: skybox_image.clone(),
-        });
-
-        let mut camera_entity = commands.spawn((
-            Camera3d::default(),
-            Camera {
-                order: 0,
-                ..default()
-            },
-            bevy::render::view::Hdr,
-            bevy::core_pipeline::prepass::DepthPrepass,
-            bevy::core_pipeline::prepass::DeferredPrepass,
-            bevy::core_pipeline::prepass::NormalPrepass,
-            DistanceFog {
-                color: Color::srgb(0.62, 0.72, 0.84),
-                ..default()
-            },
-            Skybox {
-                image: skybox_image.clone(),
-                brightness: 1000.0,
-                ..Default::default()
-            },
-            EnvironmentMapLight {
-                diffuse_map: skybox_image.clone(),
-                specular_map: skybox_image.clone(),
-                intensity: 1000.0,
-                ..Default::default()
-            },
-            CharacterControllerCamera,
-            Name::new("Camera"),
-            Msaa::Off,
-        ));
-
-        camera_entity
-            .insert(ScreenSpaceReflections::default())
-            .insert(Fxaa::default())
-            .insert(Tonemapping::TonyMcMapface)
-            .insert(Bloom::default())
-            .insert(bevy::light::VolumetricFog {
-                ambient_color: Color::linear_rgb(
-                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
-                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
-                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
-                ),
-                ambient_intensity: crate::client::client_world::volumetric_fog_intensity_from_density(
-                    cli.volumetric_fog_density,
-                ),
-                ..default()
-            });
-    }
+    // Post-process / effects will be applied when the world initializes. Keep the
+    // menu camera lightweight to prevent unnecessary GPU allocation when in UI.
 }
 
 fn sync_camera_render_effects_system(
@@ -522,7 +486,7 @@ fn sync_camera_render_effects_system(
     }
 }
 
-fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
+fn configure_visuals_system(mut contexts: EguiContexts, cfg: Res<ClientSettings>) -> Result {
     /*
     contexts.ctx_mut()?.style_mut(|style| {
         let visuals = &mut style.visuals;
@@ -563,55 +527,244 @@ fn configure_visuals_system(mut contexts: EguiContexts) -> Result {
     });
     */
 
+    let language = crate::client::l10n::normalize_language(&cfg.language);
+    apply_fonts_for_language(contexts.ctx_mut()?, language)?;
+    Ok(())
+}
+
+fn refresh_fonts_on_language_change(
+    mut contexts: EguiContexts,
+    cfg: Res<ClientSettings>,
+    mut last_language: Local<String>,
+) -> Result {
+    let normalized = crate::client::l10n::normalize_language(&cfg.language);
+    if !cfg.is_changed() && !last_language.is_empty() {
+        return Ok(());
+    }
+
+    if *last_language != normalized {
+        *last_language = normalized.to_string();
+        apply_fonts_for_language(contexts.ctx_mut()?, normalized)?;
+    }
+
+    Ok(())
+}
+
+fn apply_fonts_for_language(ctx: &egui::Context, language: &str) -> Result {
+    let fonts = build_font_definitions(language)?;
+    ctx.set_fonts(fonts);
+    Ok(())
+}
+
+fn build_font_definitions(language: &str) -> Result<FontDefinitions> {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
-        "my_font".to_owned(),
-        std::sync::Arc::new(
-            FontData::from_static(include_bytes!("../../../assets/fonts/menlo.ttf")),
-        ),
+        "ui_base".to_owned(),
+        std::sync::Arc::new(FontData::from_static(include_bytes!("../../../assets/fonts/menlo.ttf"))),
     );
 
-    // On Android, prefer dynamically loading a system CJK-capable font.
-    #[cfg(target_os = "android")]
-    let sys_font_bytes = match std::fs::read("/system/fonts/DroidSansFallback.ttf") {
-        Ok(bytes) => {
-            log::info!(
-                "[UI] Android system font loaded: /system/fonts/DroidSansFallback.ttf ({} bytes)",
-                bytes.len()
-            );
-            Some(bytes)
-        },
-        Err(e) => {
-            log::warn!("[UI] Failed to load Android system font: {}", e);
-            None
-        }
-    };
-
-    #[cfg(not(target_os = "android"))]
-    let sys_font_bytes: Option<Vec<u8>> = None;
-
-    if let Some(bytes) = sys_font_bytes {
-        fonts.font_data.insert(
-            "noto_sans_sc".to_owned(),
-            std::sync::Arc::new(FontData::from_owned(bytes)),
+    let fallback_fonts = load_system_fonts_for_language(language, 3);
+    if fallback_fonts.is_empty() {
+        log::warn!(
+            "[UI] No system fallback font found for language {}; non-Latin glyphs may be incomplete.",
+            language
         );
+    } else {
+        for (idx, (source_path, bytes)) in fallback_fonts.into_iter().enumerate() {
+            let key = format!("ui_fallback_{}", idx);
+            log::info!("[UI] System fallback font loaded: {} ({} bytes)", source_path, bytes.len());
+            fonts
+                .font_data
+                .insert(key, std::sync::Arc::new(FontData::from_owned(bytes)));
+        }
     }
 
-    // Put my font first (highest priority):
-    fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.insert(0, "my_font".to_owned());
-    // Register fallback only when system font loading succeeds to avoid startup stalls on missing fonts.
-    if fonts.font_data.contains_key("noto_sans_sc") {
-        fonts.families.get_mut(&FontFamily::Proportional).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    fonts
+        .families
+        .get_mut(&FontFamily::Proportional)
+        .ok_or(crate::err_opt_is_none!())?
+        .insert(0, "ui_base".to_owned());
+    let fallback_keys: Vec<String> = fonts
+        .font_data
+        .keys()
+        .filter(|k| k.starts_with("ui_fallback_"))
+        .cloned()
+        .collect();
+    for key in &fallback_keys {
+        fonts
+            .families
+            .get_mut(&FontFamily::Proportional)
+            .ok_or(crate::err_opt_is_none!())?
+            .push(key.clone());
     }
 
-    // Put my font as last fallback for monospace:
-    fonts.families.get_mut(&FontFamily::Monospace).ok_or(crate::err_opt_is_none!())?.push("my_font".to_owned());
-    if fonts.font_data.contains_key("noto_sans_sc") {
-        fonts.families.get_mut(&FontFamily::Monospace).ok_or(crate::err_opt_is_none!())?.push("noto_sans_sc".to_owned());
+    fonts
+        .families
+        .get_mut(&FontFamily::Monospace)
+        .ok_or(crate::err_opt_is_none!())?
+        .insert(0, "ui_base".to_owned());
+    for key in &fallback_keys {
+        fonts
+            .families
+            .get_mut(&FontFamily::Monospace)
+            .ok_or(crate::err_opt_is_none!())?
+            .push(key.clone());
     }
 
-    contexts.ctx_mut()?.set_fonts(fonts);
-    Ok(())
+    Ok(fonts)
+}
+
+fn load_system_fonts_for_language(language: &str, max_fonts: usize) -> Vec<(String, Vec<u8>)> {
+    let mut loaded = Vec::new();
+    for path in font_candidate_paths_for_language(language) {
+        if loaded.len() >= max_fonts {
+            break;
+        }
+        if loaded.iter().any(|(loaded_path, _)| loaded_path == path) {
+            continue;
+        }
+        match std::fs::read(path) {
+            Ok(bytes) => loaded.push((path.to_string(), bytes)),
+            Err(_) => continue,
+        }
+    }
+    loaded
+}
+
+fn font_candidate_paths_for_language(language: &str) -> Vec<&'static str> {
+    let mut candidates = Vec::new();
+    let script = language_script_group(language);
+
+    #[cfg(target_os = "android")]
+    {
+        match script {
+            "cjk" => candidates.extend([
+                "/system/fonts/NotoSansCJK-Regular.ttc",
+                "/system/fonts/NotoSansSC-Regular.otf",
+                "/system/fonts/NotoSansJP-Regular.otf",
+                "/system/fonts/NotoSansKR-Regular.otf",
+            ]),
+            "arabic" => candidates.extend([
+                "/system/fonts/NotoNaskhArabic-Regular.ttf",
+                "/system/fonts/NotoSansArabic-Regular.ttf",
+            ]),
+            "devanagari" => candidates.extend(["/system/fonts/NotoSansDevanagari-Regular.ttf"]),
+            "bengali" => candidates.extend(["/system/fonts/NotoSansBengali-Regular.ttf"]),
+            "thai" => candidates.extend(["/system/fonts/NotoSansThai-Regular.ttf"]),
+            "hebrew" => candidates.extend(["/system/fonts/NotoSansHebrew-Regular.ttf"]),
+            "cyrillic" | "latin" | "greek" => {}
+            _ => {}
+        }
+        candidates.push("/system/fonts/DroidSansFallback.ttf");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match script {
+            "cjk" => candidates.extend([
+                "C:/Windows/Fonts/msyh.ttc",
+                "C:/Windows/Fonts/msyh.ttf",
+                "C:/Windows/Fonts/msjh.ttc",
+                "C:/Windows/Fonts/meiryo.ttc",
+                "C:/Windows/Fonts/msgothic.ttc",
+                "C:/Windows/Fonts/malgun.ttf",
+                "C:/Windows/Fonts/simsun.ttc",
+                "C:/Windows/Fonts/simhei.ttf",
+            ]),
+            "arabic" => candidates.extend([
+                "C:/Windows/Fonts/segoeui.ttf",
+                "C:/Windows/Fonts/tradbdo.ttf",
+                "C:/Windows/Fonts/arial.ttf",
+            ]),
+            "devanagari" => candidates.extend([
+                "C:/Windows/Fonts/Nirmala.ttf",
+                "C:/Windows/Fonts/mangal.ttf",
+            ]),
+            "bengali" => candidates.extend([
+                "C:/Windows/Fonts/Nirmala.ttf",
+                "C:/Windows/Fonts/vrinda.ttf",
+            ]),
+            "thai" => candidates.extend([
+                "C:/Windows/Fonts/LeelawUI.ttf",
+                "C:/Windows/Fonts/tahoma.ttf",
+            ]),
+            "hebrew" => candidates.extend([
+                "C:/Windows/Fonts/arial.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+            ]),
+            "cyrillic" | "greek" | "latin" => {}
+            _ => {}
+        }
+        candidates.extend([
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/seguisym.ttf",
+        ]);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        match script {
+            "cjk" => candidates.extend([
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+            ]),
+            "arabic" => candidates.extend([
+                "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                "/System/Library/Fonts/Supplemental/Geeza Pro.ttc",
+            ]),
+            "devanagari" => candidates.extend(["/System/Library/Fonts/Supplemental/Devanagari Sangam MN.ttc"]),
+            "thai" => candidates.extend(["/System/Library/Fonts/Supplemental/Thonburi.ttc"]),
+            "hebrew" => candidates.extend(["/System/Library/Fonts/Supplemental/Arial Hebrew.ttf"]),
+            "bengali" | "cyrillic" | "greek" | "latin" => {}
+            _ => {}
+        }
+        candidates.push("/System/Library/Fonts/Supplemental/Arial Unicode.ttf");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        match script {
+            "cjk" => candidates.extend([
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf",
+                "/usr/share/fonts/opentype/noto/NotoSansJP-Regular.otf",
+                "/usr/share/fonts/opentype/noto/NotoSansKR-Regular.otf",
+            ]),
+            "arabic" => candidates.extend([
+                "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+            ]),
+            "devanagari" => candidates.extend(["/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf"]),
+            "bengali" => candidates.extend(["/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"]),
+            "thai" => candidates.extend(["/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf"]),
+            "hebrew" => candidates.extend(["/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf"]),
+            "cyrillic" | "greek" | "latin" => {}
+            _ => {}
+        }
+        candidates.extend([
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ]);
+    }
+
+    candidates
+}
+
+fn language_script_group(language: &str) -> &'static str {
+    match crate::client::l10n::normalize_language(language) {
+        "zh-Hans" | "zh-Hant" | "lzh" | "ja-JP" | "ko-KR" => "cjk",
+        "ru-RU" | "uk-UA" => "cyrillic",
+        "ar-SA" | "ur-PK" | "fa-IR" => "arabic",
+        "he-IL" => "hebrew",
+        "hi-IN" => "devanagari",
+        "bn-BD" => "bengali",
+        "th-TH" => "thai",
+        "el-GR" => "greek",
+        _ => "latin",
+    }
 }
 
 fn configure_ui_state_system(mut ui_state: ResMut<UiState>) {
@@ -629,16 +782,57 @@ fn init_ui_scale_factor_system(
     egui_settings.scale_factor = if cfg!(target_os = "android") { 1.2 } else { 1.0 };
 }
 
-fn sync_ui_window_metrics_system(query_window: Query<&Window, With<PrimaryWindow>>) {
-    let Ok(window) = query_window.single() else {
-        return;
-    };
-
-    set_window_size(Vec2::new(window.resolution.width(), window.resolution.height()));
-    if cfg!(target_os = "android") {
-        let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
-        set_ui_safe_top(safe_top);
+fn sync_ui_window_metrics_system(
+    mut resize_start: EventReader<bevy::window::WindowResizeStart>,
+    mut resize_events: EventReader<bevy::window::WindowResized>,
+    mut resize_end: EventReader<bevy::window::WindowResizeEnd>,
+    query_window: Query<&Window, With<PrimaryWindow>>,
+    mut tracker: Local<WindowResizeTracker>,
+) {
+    // On resize start: enter resize/drag mode and clear pending size.
+    if resize_start.iter().next().is_some() {
+        tracker.resizing = true;
+        tracker.last_size = None;
     }
+
+    // Process WindowResized events: if currently resizing, remember the last size
+    // but do not call `set_window_size`. If not resizing, update immediately.
+    for _ev in resize_events.iter() {
+        if let Ok(window) = query_window.single() {
+            let size = Vec2::new(window.resolution.width(), window.resolution.height());
+            if tracker.resizing {
+                tracker.last_size = Some(size);
+            } else {
+                set_window_size(size);
+                if cfg!(target_os = "android") {
+                    let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
+                    set_ui_safe_top(safe_top);
+                }
+            }
+        }
+    }
+
+    // On resize end: apply the last seen size (if any) once and leave resize mode.
+    if resize_end.iter().next().is_some() {
+        let final_size = tracker.last_size.or_else(|| {
+            query_window.single().ok().map(|w| Vec2::new(w.resolution.width(), w.resolution.height()))
+        });
+        if let Some(size) = final_size {
+            set_window_size(size);
+            if cfg!(target_os = "android") {
+                if let Ok(window) = query_window.single() {
+                    let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
+                    set_ui_safe_top(safe_top);
+                }
+            }
+        }
+        tracker.resizing = false;
+        tracker.last_size = None;
+    }
+}
+
+fn sync_l10n_language_system(cfg: Res<ClientSettings>) {
+    l10n::set_current_language(&cfg.language);
 }
 
 fn ui_example_system(
@@ -727,9 +921,9 @@ pub fn ui_lr_panel(ui: &mut Ui, separator: bool, mut add_nav: impl FnMut(&mut Ui
                     strip.cell(|ui| {
                         ui.with_layout(Layout::bottom_up(egui::Align::Min), |ui| {
                             let back_resp = if cfg!(target_os = "android") {
-                                sfx_play(ui.add_sized([140.0, 46.0], egui::Button::new("Back")))
+                                sfx_play(ui.add_sized([140.0, 46.0], egui::Button::new(l10n::tr("Back"))))
                             } else {
-                                sfx_play(ui.selectable_label(false, "⬅Back"))
+                                sfx_play(ui.selectable_label(false, l10n::tr("⬅Back")))
                             };
                             if back_resp.clicked() {
                                 if let Ok(mut sfx_state) = UI_SFX_STATE.lock() {

@@ -13,6 +13,7 @@ use bevy_renet::{netcode::NetcodeClientTransport};
 use std::sync::atomic::Ordering;
 
 use crate::{
+    client::l10n,
     client::prelude::*,
     net::{CPacket, RenetClientHelper},
     ui::{color32_of, CurrentUI, UiExtra},
@@ -66,9 +67,9 @@ pub fn ui_menu_panel(
                     ui.add_space(16.);
                     // ui.small("108M\n30K");
                     // ui.small("10M/s\n8K/s");
-                    // ui.label("·");
+                    // ui.label(l10n::tr("·"));
                     // ui.small("9ms\n12ms");
-                    // ui.label("127.0.0.1:4000 · 21ms");
+                    // ui.label(l10n::tr("127.0.0.1:4000 · 21ms"));
 
                     // Network Info
                     if let Some(net_transport) = net_transport {
@@ -87,8 +88,11 @@ pub fn ui_menu_panel(
                                 let info_bg = Color32::from_rgba_unmultiplied(20, 24, 32, 220);
                                 egui::Frame::default().fill(info_bg).show(ui, |ui| {
                                     ui.vertical(|ui| {
-                                        ui.colored_label(Color32::from_rgb(140, 200, 255), format!("Server: {}", &cli.server_addr))
-                                            .on_hover_text("Server Addr");
+                                        ui.colored_label(
+                                            Color32::from_rgb(140, 200, 255),
+                                            format!("{} {}", l10n::tr("Server:"), &cli.server_addr),
+                                        )
+                                        .on_hover_text(l10n::tr("Server Addr"));
                                         ui.add_space(4.);
                                         ui.horizontal(|ui| {
                                             let ping_color = if ping.0 < 80 {
@@ -98,17 +102,19 @@ pub fn ui_menu_panel(
                                             } else {
                                                 Color32::from_rgb(255, 100, 100)
                                             };
-                                            ui.colored_label(ping_color, format!("RTT {:>4} ms", ping.0))
-                                                .on_hover_text("Latency / RTT");
+                                            ui.colored_label(ping_color, format!("{} {:>4} ms", l10n::tr("RTT"), ping.0))
+                                                .on_hover_text(l10n::tr("Latency / RTT"));
                                             ui.separator();
                                             ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{:>8}/s", human_bytes(bytes_per_sec)))
-                                                .on_hover_text("Bandwidth");
+                                                .on_hover_text(l10n::tr("Bandwidth"));
                                             ui.small(format!(
-                                                "up {:>8}/s | down {:>8}/s",
+                                                "{} {:>8}/s | {} {:>8}/s",
+                                                l10n::tr("Up"),
                                                 human_bytes(ni.bytes_sent_per_second),
+                                                l10n::tr("Down"),
                                                 human_bytes(ni.bytes_received_per_second)
                                             ))
-                                            .on_hover_text("Bandwidth (Upload/Download)");
+                                            .on_hover_text(l10n::tr("Bandwidth (Upload/Download)"));
                                         });
                                         ui.add_space(2.);
                                         let loss_color = if ni.packet_loss == 0.0 {
@@ -118,7 +124,7 @@ pub fn ui_menu_panel(
                                         } else {
                                             Color32::from_rgb(255, 100, 100)
                                         };
-                                        ui.colored_label(loss_color, format!("loss: {}", ni.packet_loss));
+                                        ui.colored_label(loss_color, format!("{} {}", l10n::tr("Loss:"), ni.packet_loss));
                                     });
                                 });
                             });
@@ -130,14 +136,14 @@ pub fn ui_menu_panel(
                         ui.separator();
 
                         if worldinfo.is_paused {
-                            if egui::Button::new("▶").ui(ui).clicked() {
+                            if egui::Button::new(l10n::tr("Resume")).ui(ui).clicked() {
                                 worldinfo.is_paused = false;
                             }
-                            if egui::Button::new("⏩").ui(ui).clicked() {
-                                //⏩
+                            if egui::Button::new(l10n::tr("Step")).ui(ui).clicked() {
+                                //�?
                                 worldinfo.paused_steps += 1;
                             }
-                        } else if egui::Button::new("⏸").ui(ui).clicked() {
+                        } else if egui::Button::new(l10n::tr("Pause")).ui(ui).clicked() {
                             worldinfo.is_paused = true;
                         }
                     }
@@ -146,20 +152,20 @@ pub fn ui_menu_panel(
                     ui.with_layout(Layout::left_to_right(egui::Align::BOTTOM), |ui| {
                         let is_admin_user = cl.data().is_admin;
                         ui.add_space(12.);
-                        ui.menu_button("System", |ui| {
-                            ui.menu_button("Connect to Server", |ui| {
-                                ui.button("Add Server").clicked();
+                        ui.menu_button(l10n::tr("System"), |ui| {
+                            ui.menu_button(l10n::tr("Connect to Server"), |ui| {
+                                ui.button(l10n::tr("Add Server")).clicked();
                                 ui.separator();
                             });
-                            ui.menu_button("Open World", |ui| {
-                                if ui.btn("New World").clicked() {
+                            ui.menu_button(l10n::tr("Open World"), |ui| {
+                                if ui.btn(l10n::tr("New World")).clicked() {
                                     let cli = cl.data();
                                     cli.curr_ui = CurrentUI::LocalWorldNew;
                                 }
-                                ui.btn("Open World..").clicked();
+                                ui.btn(l10n::tr("Open World..")).clicked();
                                 ui.separator();
                             });
-                            if ui.btn("Edit World..").clicked() {
+                            if ui.btn(l10n::tr("Edit World..")).clicked() {
                                 let cli = cl.data();
                                 if cli.is_admin {
                                     cli.curr_ui = CurrentUI::WorldEditor;
@@ -167,29 +173,29 @@ pub fn ui_menu_panel(
                                     cli.enable_cursor_look = false;
                                 }
                             }
-                            if ui.btn("Close World").clicked() {
+                            if ui.btn(l10n::tr("Close World")).clicked() {
                                 cl.exit_world();
                             }
                             ui.separator();
-                            if ui.btn("Settings").clicked() {
+                            if ui.btn(l10n::tr("Settings")).clicked() {
                                 let cli = cl.data();
                                 cli.curr_ui = CurrentUI::Settings;
                             }
-                            ui.button("Mods").clicked();
-                            ui.button("Assets").clicked();
-                            ui.button("Controls").clicked();
-                            ui.button("About").clicked();
+                            ui.button(l10n::tr("Mods")).clicked();
+                            ui.button(l10n::tr("Assets")).clicked();
+                            ui.button(l10n::tr("Controls")).clicked();
+                            ui.button(l10n::tr("About")).clicked();
                             ui.separator();
-                            if ui.button("Terminate").clicked() {
+                            if ui.button(l10n::tr("Terminate")).clicked() {
                                 app_exit_events.write(AppExit::Success);
                             }
                         });
-                        ui.menu_button("Voxel", |ui| {
+                        ui.menu_button(l10n::tr("Voxel"), |ui| {
                             let cli = cl.data();
-                            // ui.label("Gizmos:");
-                            ui.toggle_value(&mut cli.dbg_gizmo_all_loaded_chunks, "Gizmo Loaded Chunks");
-                            ui.toggle_value(&mut cli.dbg_gizmo_curr_chunk, "Gizmo Current Chunk");
-                            ui.toggle_value(&mut cli.dbg_gizmo_remesh_chunks, "Gizmo ReMesh Chunks");
+                            // ui.label(l10n::tr("Gizmos:"));
+                            ui.toggle_value(&mut cli.dbg_gizmo_all_loaded_chunks, l10n::tr("Gizmo Loaded Chunks"));
+                            ui.toggle_value(&mut cli.dbg_gizmo_curr_chunk, l10n::tr("Gizmo Current Chunk"));
+                            ui.toggle_value(&mut cli.dbg_gizmo_remesh_chunks, l10n::tr("Gizmo ReMesh Chunks"));
                             
                             ui.separator();
 
@@ -198,7 +204,7 @@ pub fn ui_menu_panel(
                                     return;
                                 };
                                 let campos = cam_transform.translation.as_ivec3();
-                                if ui.button("Compute Voxel Light").clicked() {
+                                if ui.button(l10n::tr("Compute Voxel Light")).clicked() {
                                     // for chunk in chunk_sys.get_chunks().values() {
                                     //     Chunk::compute_voxel_light(chunk.as_mut());
                                     // }
@@ -228,17 +234,17 @@ pub fn ui_menu_panel(
                                     lighting::compute_voxel_light(&mut queue, &mut Vec::new());
                                 }
                                 let mut force_blocky = voxel::meshgen::DBG_FORCE_BLOCKY.load(Ordering::Relaxed);
-                                if ui.toggle_value(&mut force_blocky, "Is Force Blocky").changed() {
+                                if ui.toggle_value(&mut force_blocky, l10n::tr("Is Force Blocky")).changed() {
                                     voxel::meshgen::DBG_FORCE_BLOCKY.store(force_blocky, Ordering::Relaxed);
                                 }
 
-                                if ui.button("ReMesh All Chunks").clicked() {
+                                if ui.button(l10n::tr("ReMesh All Chunks")).clicked() {
                                     let chunk_keys = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
                                     for chunkpos in chunk_keys {
                                         chunk_sys.mark_chunk_remesh(chunkpos);
                                     }
                                 }
-                                if ui.button("ReMesh Nr Chunks").clicked() {
+                                if ui.button(l10n::tr("ReMesh Nr Chunks")).clicked() {
                                     let chunk_keys = Vec::from_iter(chunk_sys.get_chunks().keys().cloned());
                                     for chunkpos in chunk_keys {
                                         if voxel::is_chunk_in_load_distance(Chunk::as_chunkpos(campos), chunkpos, IVec2::new(2,2)) {
@@ -246,12 +252,12 @@ pub fn ui_menu_panel(
                                         }
                                     }
                                 }
-                                if ui.button("Gen Tree").clicked() {
+                                if ui.button(l10n::tr("Gen Tree")).clicked() {
                                     if let Some(chunk) = chunk_sys.get_chunk(Chunk::as_chunkpos(campos)) {
-                                        worldgen::gen_tree(chunk.as_mut(), Chunk::as_localpos(campos), 0.8);
+                                        worldgen::gen_tree(chunk.as_mut(), &chunk_sys.world_config, Chunk::as_localpos(campos), 0.8);
                                     }
                                 }
-                                if ui.button("Gen Floor").clicked() {
+                                if ui.button(l10n::tr("Gen Floor")).clicked() {
 
                                     // crate::util::iter::iter_center_spread(10, 1, |p| {
                                     // });
@@ -266,7 +272,7 @@ pub fn ui_menu_panel(
                                 }
                             }
                         });
-                        ui.menu_button("Render", |ui| {
+                        ui.menu_button(l10n::tr("Render"), |ui| {
                             let cli = cl.data();
 
                             let fog_status_color = if cli.render_volumetric_fog {
@@ -274,16 +280,16 @@ pub fn ui_menu_panel(
                             } else {
                                 Color32::from_rgb(255, 120, 120)
                             };
-                            ui.colored_label(fog_status_color, format!("Volumetric Fog: {}", if cli.render_volumetric_fog { "ON" } else { "OFF" }));
-                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Density: {:.2}", cli.volumetric_fog_density));
+                            ui.colored_label(fog_status_color, format!("{}: {}", l10n::tr("Volumetric Fog"), if cli.render_volumetric_fog { l10n::tr("ON") } else { l10n::tr("OFF") }));
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{}: {:.2}", l10n::tr("Fog Density"), cli.volumetric_fog_density));
 
                             match query_vol_fog.single() {
                                 Ok(vol_fog) => {
-                                    ui.colored_label(Color32::from_rgb(100, 220, 120), "Camera Fog Entity: PRESENT")
+                                    ui.colored_label(Color32::from_rgb(100, 220, 120), format!("{}: {}", l10n::tr("Camera Fog Entity"), l10n::tr("PRESENT")))
                                         .on_hover_text(format!("ambient_intensity = {:.3}", vol_fog.ambient_intensity));
                                 }
                                 Err(_) => {
-                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Camera Fog Entity: MISSING");
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), format!("{}: {}", l10n::tr("Camera Fog Entity"), l10n::tr("MISSING")));
                                 }
                             }
 
@@ -292,11 +298,11 @@ pub fn ui_menu_panel(
                                     let light_ok = has_volumetric_light.is_some();
                                     ui.colored_label(
                                         if light_ok { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
-                                        format!("Sun: PRESENT | VolumetricLight: {}", if light_ok { "YES" } else { "NO" }),
+                                        format!("{}: {} | {}: {}", l10n::tr("Sun"), l10n::tr("PRESENT"), l10n::tr("VolumetricLight"), if light_ok { l10n::tr("YES") } else { l10n::tr("NO") }),
                                     );
                                 }
                                 Err(_) => {
-                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Sun: MISSING");
+                                    ui.colored_label(Color32::from_rgb(255, 120, 120), format!("{}: {}", l10n::tr("Sun"), l10n::tr("MISSING")));
                                 }
                             }
 
@@ -311,14 +317,14 @@ pub fn ui_menu_panel(
                                 1.0
                             };
                             ui.separator();
-                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Visibility: {:.1}", cli.sky_fog_visibility));
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{}: {:.1}", l10n::tr("Fog Visibility"), cli.sky_fog_visibility));
                             ui.colored_label(
                                 Color32::from_rgb(130, 200, 255),
-                                format!("Effective Visibility: {:.1}", cli.sky_fog_visibility * fog_visibility_scale),
+                                format!("{}: {:.1}", l10n::tr("Effective Visibility"), cli.sky_fog_visibility * fog_visibility_scale),
                             );
                             ui.colored_label(
                                 if cli.sky_fog_is_atomspheric { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
-                                format!("Atmospheric: {}", if cli.sky_fog_is_atomspheric { "YES" } else { "NO" }),
+                                format!("{}: {}", l10n::tr("Atmospheric"), if cli.sky_fog_is_atomspheric { l10n::tr("YES") } else { l10n::tr("NO") }),
                             );
                             ui.colored_label(
                                 if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
@@ -327,31 +333,45 @@ pub fn ui_menu_panel(
                                     Color32::from_rgb(120, 220, 255)
                                 },
                                 format!(
-                                    "Dense Fallback: {}",
+                                    "{}: {}",
+                                    l10n::tr("Dense Fallback"),
                                     if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
-                                        "FORCED EXP2"
+                                        l10n::tr("FORCED EXP2")
                                     } else {
-                                        "OFF"
+                                        l10n::tr("OFF")
                                     }
                                 ),
                             );
                         });
-                        ui.menu_button("Fog", |ui| {
+                        ui.menu_button(l10n::tr("Fog"), |ui| {
                             let cli = cl.data();
                             let fog_status_color = if cli.render_volumetric_fog {
                                 Color32::from_rgb(100, 220, 120)
                             } else {
                                 Color32::from_rgb(255, 120, 120)
                             };
-                            ui.colored_label(fog_status_color, format!("Volumetric Fog: {}", if cli.render_volumetric_fog { "ON" } else { "OFF" }));
-                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Density: {:.2}", cli.volumetric_fog_density));
+                            ui.colored_label(
+                                fog_status_color,
+                                format!(
+                                    "{}: {}",
+                                    l10n::tr("Volumetric Fog"),
+                                    if cli.render_volumetric_fog { l10n::tr("ON") } else { l10n::tr("OFF") }
+                                ),
+                            );
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{}: {:.2}", l10n::tr("Fog Density"), cli.volumetric_fog_density));
                             match query_vol_fog.single() {
                                 Ok(vol_fog) => {
-                                    ui.colored_label(Color32::from_rgb(100, 220, 120), "Camera Fog Entity: PRESENT")
+                                    ui.colored_label(
+                                        Color32::from_rgb(100, 220, 120),
+                                        format!("{}: {}", l10n::tr("Camera Fog Entity"), l10n::tr("PRESENT")),
+                                    )
                                         .on_hover_text(format!("ambient_intensity = {:.3}", vol_fog.ambient_intensity));
                                 }
                                 Err(_) => {
-                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Camera Fog Entity: MISSING");
+                                    ui.colored_label(
+                                        Color32::from_rgb(255, 120, 120),
+                                        format!("{}: {}", l10n::tr("Camera Fog Entity"), l10n::tr("MISSING")),
+                                    );
                                 }
                             }
                             match query_sun.single() {
@@ -359,11 +379,20 @@ pub fn ui_menu_panel(
                                     let light_ok = has_volumetric_light.is_some();
                                     ui.colored_label(
                                         if light_ok { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
-                                        format!("Sun: PRESENT | VolumetricLight: {}", if light_ok { "YES" } else { "NO" }),
+                                        format!(
+                                            "{}: {} | {}: {}",
+                                            l10n::tr("Sun"),
+                                            l10n::tr("PRESENT"),
+                                            l10n::tr("VolumetricLight"),
+                                            if light_ok { l10n::tr("YES") } else { l10n::tr("NO") }
+                                        ),
                                     );
                                 }
                                 Err(_) => {
-                                    ui.colored_label(Color32::from_rgb(255, 120, 120), "Sun: MISSING");
+                                    ui.colored_label(
+                                        Color32::from_rgb(255, 120, 120),
+                                        format!("{}: {}", l10n::tr("Sun"), l10n::tr("MISSING")),
+                                    );
                                 }
                             }
                             let fog_density = if cli.volumetric_fog_density.is_finite() {
@@ -377,14 +406,18 @@ pub fn ui_menu_panel(
                                 1.0
                             };
                             ui.separator();
-                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("Fog Visibility: {:.1}", cli.sky_fog_visibility));
+                            ui.colored_label(Color32::from_rgb(120, 220, 255), format!("{}: {:.1}", l10n::tr("Fog Visibility"), cli.sky_fog_visibility));
                             ui.colored_label(
                                 Color32::from_rgb(130, 200, 255),
-                                format!("Effective Visibility: {:.1}", cli.sky_fog_visibility * fog_visibility_scale),
+                                format!("{}: {:.1}", l10n::tr("Effective Visibility"), cli.sky_fog_visibility * fog_visibility_scale),
                             );
                             ui.colored_label(
                                 if cli.sky_fog_is_atomspheric { Color32::from_rgb(100, 220, 120) } else { Color32::from_rgb(255, 200, 80) },
-                                format!("Atmospheric: {}", if cli.sky_fog_is_atomspheric { "YES" } else { "NO" }),
+                                format!(
+                                    "{}: {}",
+                                    l10n::tr("Atmospheric"),
+                                    if cli.sky_fog_is_atomspheric { l10n::tr("YES") } else { l10n::tr("NO") }
+                                ),
                             );
                             ui.colored_label(
                                 if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
@@ -393,46 +426,50 @@ pub fn ui_menu_panel(
                                     Color32::from_rgb(120, 220, 255)
                                 },
                                 format!(
-                                    "Dense Fallback: {}",
+                                    "{}: {}",
+                                    l10n::tr("Dense Fallback"),
                                     if cli.render_volumetric_fog && cli.volumetric_fog_density >= 1.5 {
-                                        "FORCED EXP2"
+                                        l10n::tr("FORCED EXP2")
                                     } else {
-                                        "OFF"
+                                        l10n::tr("OFF")
                                     }
                                 ),
                             );
                         });
                         if is_admin_user {
-                            ui.menu_button("Admin", |ui| {
+                            ui.menu_button(l10n::tr("Admin"), |ui| {
                                 let cli = cl.data();
-                                ui.label(if cli.is_owner { "Role: Owner" } else { "Role: Admin" });
+                                ui.label(if cli.is_owner { l10n::tr("Role: Owner") } else { l10n::tr("Role: Admin") });
                                 ui.label(format!(
-                                    "God: {} | Noclip: {}",
-                                    if cli.admin_god_enabled { "ON" } else { "OFF" },
-                                    if cli.admin_noclip_enabled { "ON" } else { "OFF" }
+                                    "{}: {} | {}: {}",
+                                    l10n::tr("God"),
+                                    if cli.admin_god_enabled { l10n::tr("ON") } else { l10n::tr("OFF") },
+                                    l10n::tr("Noclip"),
+                                    if cli.admin_noclip_enabled { l10n::tr("ON") } else { l10n::tr("OFF") }
                                 ));
                                 ui.label(format!(
-                                    "Global Editor View: {}",
-                                    if cli.global_editor_view { "ON (F7)" } else { "OFF (F7)" }
+                                    "{}: {}",
+                                    l10n::tr("Global Editor View"),
+                                    if cli.global_editor_view { l10n::tr("ON (F7)") } else { l10n::tr("OFF (F7)") }
                                 ));
-                                if ui.button("Open Admin Panel (F8)").clicked() {
+                                if ui.button(l10n::tr("Open Admin Panel (F8)")).clicked() {
                                     cli.admin_panel_open = true;
                                 }
-                                ui.small("Hotkeys: F10 world editor, F7 camera view, G toggle God, V toggle Noclip");
+                                ui.small(l10n::tr("Hotkeys: F10 world editor, F7 camera view, G toggle God, V toggle Noclip"));
                             });
                         }
-                        ui.menu_button("Audio", |_ui| {});
-                        ui.menu_button("View", |ui| {
-                            ui.toggle_value(&mut true, "HUD");
-                            ui.toggle_value(&mut false, "Fullscreen");
-                            if ui.button("Take Screenshot").clicked() {
+                        ui.menu_button(l10n::tr("Audio"), |_ui| {});
+                        ui.menu_button(l10n::tr("View"), |ui| {
+                            ui.toggle_value(&mut true, l10n::tr("HUD"));
+                            ui.toggle_value(&mut false, l10n::tr("Fullscreen"));
+                            if ui.button(l10n::tr("Take Screenshot")).clicked() {
                                 todo!();
                             }
 
                             ui.separator();
                             let cli = cl.data();
-                            ui.toggle_value(&mut cli.dbg_text, "Debug Text");
-                            ui.toggle_value(&mut cli.dbg_inspector, "Inspector");
+                            ui.toggle_value(&mut cli.dbg_text, l10n::tr("Debug Text"));
+                            ui.toggle_value(&mut cli.dbg_inspector, l10n::tr("Inspector"));
                         });
                     });
                 });
@@ -455,18 +492,19 @@ pub fn ui_admin_panel(
 
     let mut request: Option<crate::net::AdminRequest> = None;
 
-    egui::Window::new("Admin Panel")
+    egui::Window::new(l10n::tr("Admin Panel"))
         .resizable(false)
         .collapsible(false)
         .default_width(320.0)
         .anchor(Align2::RIGHT_TOP, [-14.0, 54.0])
         .show(ctx_mut, |ui| {
-            ui.label(if cli.is_owner { "Role: Owner" } else { "Role: Admin" });
+            ui.label(if cli.is_owner { l10n::tr("Role: Owner") } else { l10n::tr("Role: Admin") });
             ui.separator();
-            ui.label(format!("God Mode: {}", if cli.admin_god_enabled { "Enabled" } else { "Disabled" }));
+            ui.label(format!("{}: {}", l10n::tr("God Mode"), if cli.admin_god_enabled { l10n::tr("Enabled") } else { l10n::tr("Disabled") }));
             ui.label(format!(
-                "Noclip: {}",
-                if cli.admin_noclip_enabled { "Enabled" } else { "Disabled" }
+                "{}: {}",
+                l10n::tr("Noclip"),
+                if cli.admin_noclip_enabled { l10n::tr("Enabled") } else { l10n::tr("Disabled") }
             ));
             ui.label(format!(
                 "Global Editor View: {}",
@@ -474,29 +512,29 @@ pub fn ui_admin_panel(
             ));
 
             ui.add_space(6.0);
-            if ui.button("Toggle Global Editor View [F7]").clicked() {
+            if ui.button(l10n::tr("Toggle Global Editor View [F7]")).clicked() {
                 cli.global_editor_view = !cli.global_editor_view;
             }
-            if ui.button("Toggle God [G]").clicked() {
+            if ui.button(l10n::tr("Toggle God [G]")).clicked() {
                 request = Some(crate::net::AdminRequest::ToggleGod);
             }
-            if ui.button("Toggle Noclip [V]").clicked() {
+            if ui.button(l10n::tr("Toggle Noclip [V]")).clicked() {
                 request = Some(crate::net::AdminRequest::ToggleNoclip);
             }
-            if ui.button("Request World Save").clicked() {
+            if ui.button(l10n::tr("Request World Save")).clicked() {
                 request = Some(crate::net::AdminRequest::SaveWorld);
             }
-            if ui.button("Open World Editor [F10]").clicked() {
+            if ui.button(l10n::tr("Open World Editor [F10]")).clicked() {
                 cli.curr_ui = CurrentUI::WorldEditor;
                 cli.global_editor_view = true;
                 cli.enable_cursor_look = false;
             }
 
             ui.add_space(8.0);
-            ui.small("Commands: /op <user>, /deop <user>, /god, /noclip, /time set <v>, /save");
-            ui.small("Server is authoritative: states update from server packets.");
+            ui.small(l10n::tr("Commands: /op <user>, /deop <user>, /god, /noclip, /time set <v>, /save"));
+            ui.small(l10n::tr("Server is authoritative: states update from server packets."));
 
-            if ui.button("Close").clicked() {
+            if ui.button(l10n::tr("Close")).clicked() {
                 cli.admin_panel_open = false;
             }
         });
@@ -544,16 +582,16 @@ pub fn ui_world_editor_panel(
 
     egui::TopBottomPanel::top("editor_workspace_top").show(ctx_mut, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.heading("Editor Workspace");
+            ui.heading(l10n::tr("Editor Workspace"));
             ui.separator();
             if ui
-                .selectable_label(editor_runtime.view_mode == EditorViewMode::View3D, "Viewport 3D")
+                .selectable_label(editor_runtime.view_mode == EditorViewMode::View3D, l10n::tr("Viewport 3D"))
                 .clicked()
             {
                 editor_runtime.view_mode = EditorViewMode::View3D;
             }
             if ui
-                .selectable_label(editor_runtime.view_mode == EditorViewMode::View2D, "Viewport 2D")
+                .selectable_label(editor_runtime.view_mode == EditorViewMode::View2D, l10n::tr("Viewport 2D"))
                 .clicked()
             {
                 editor_runtime.view_mode = EditorViewMode::View2D;
@@ -562,42 +600,42 @@ pub fn ui_world_editor_panel(
 
             egui::ComboBox::from_id_salt("editor_camera_mode")
                 .selected_text(match editor_runtime.camera_mode {
-                    EditorCameraMode::Fly => "Camera: Fly",
-                    EditorCameraMode::Orbit => "Camera: Orbit",
-                    EditorCameraMode::TopDown => "Camera: TopDown",
+                    EditorCameraMode::Fly => l10n::tr("Camera: Fly"),
+                    EditorCameraMode::Orbit => l10n::tr("Camera: Orbit"),
+                    EditorCameraMode::TopDown => l10n::tr("Camera: TopDown"),
                 })
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Fly, "Fly");
-                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Orbit, "Orbit");
-                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::TopDown, "TopDown");
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Fly, l10n::tr("Fly"));
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::Orbit, l10n::tr("Orbit"));
+                    ui.selectable_value(&mut editor_runtime.camera_mode, EditorCameraMode::TopDown, l10n::tr("TopDown"));
                 });
 
             egui::ComboBox::from_id_salt("editor_render_mode")
                 .selected_text(match editor_runtime.render_mode {
-                    EditorRenderMode::Lit => "Render: Lit",
-                    EditorRenderMode::Flat => "Render: Flat",
-                    EditorRenderMode::Performance => "Render: Performance",
-                    EditorRenderMode::Wireframe => "Render: Wireframe",
+                    EditorRenderMode::Lit => l10n::tr("Render: Lit"),
+                    EditorRenderMode::Flat => l10n::tr("Render: Flat"),
+                    EditorRenderMode::Performance => l10n::tr("Render: Performance"),
+                    EditorRenderMode::Wireframe => l10n::tr("Render: Wireframe"),
                 })
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Lit, "Lit");
-                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Flat, "Flat");
-                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Performance, "Performance");
-                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Wireframe, "Wireframe");
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Lit, l10n::tr("Lit"));
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Flat, l10n::tr("Flat"));
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Performance, l10n::tr("Performance"));
+                    ui.selectable_value(&mut editor_runtime.render_mode, EditorRenderMode::Wireframe, l10n::tr("Wireframe"));
                 });
 
-            if ui.checkbox(&mut cli.dbg_gizmo_all_loaded_chunks, "Chunk Bounds").changed() {
+            if ui.checkbox(&mut cli.dbg_gizmo_all_loaded_chunks, l10n::tr("Chunk Bounds")).changed() {
                 cli.dbg_gizmo_curr_chunk = cli.dbg_gizmo_all_loaded_chunks;
                 cli.dbg_gizmo_remesh_chunks = cli.dbg_gizmo_all_loaded_chunks;
             }
 
             ui.separator();
-            ui.checkbox(&mut editor_runtime.show_help, "Help");
+            ui.checkbox(&mut editor_runtime.show_help, l10n::tr("Help"));
             ui.separator();
-            ui.label("F10: Exit Editor");
-            ui.label("F9: Inspector");
+            ui.label(l10n::tr("F10: Exit Editor"));
+            ui.label(l10n::tr("F9: Inspector"));
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Exit [F10]").clicked() {
+                if ui.button(l10n::tr("Exit [F10]")).clicked() {
                     cli.curr_ui = CurrentUI::None;
                     cli.global_editor_view = false;
                     cli.enable_cursor_look = true;
@@ -613,19 +651,19 @@ pub fn ui_world_editor_panel(
         .show(ctx_mut, |ui| {
             ui.horizontal(|ui| {
                 if ui
-                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Resources, "Resources")
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Resources, l10n::tr("Resources"))
                     .clicked()
                 {
                     editor_runtime.bottom_tab = EditorBottomTab::Resources;
                 }
                 if ui
-                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Diagnostics, "Diagnostics")
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Diagnostics, l10n::tr("Diagnostics"))
                     .clicked()
                 {
                     editor_runtime.bottom_tab = EditorBottomTab::Diagnostics;
                 }
                 if ui
-                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Assets, "Assets")
+                    .selectable_label(editor_runtime.bottom_tab == EditorBottomTab::Assets, l10n::tr("Assets"))
                     .clicked()
                 {
                     editor_runtime.bottom_tab = EditorBottomTab::Assets;
@@ -635,19 +673,19 @@ pub fn ui_world_editor_panel(
 
             match editor_runtime.bottom_tab {
                 EditorBottomTab::Resources => {
-                    ui.label("Voxel Brush");
-                    ui.add(egui::Slider::new(&mut vox_brush.size, 0.0..=32.0).text("Size"));
-                    ui.add(egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0).text("Intensity"));
-                    ui.add(egui::Slider::new(&mut vox_brush.tex, 0..=64).text("Material ID"));
+                    ui.label(l10n::tr("Voxel Brush"));
+                    ui.add(egui::Slider::new(&mut vox_brush.size, 0.0..=32.0).text(l10n::tr("Size")));
+                    ui.add(egui::Slider::new(&mut vox_brush.strength, 0.0..=1.0).text(l10n::tr("Intensity")));
+                    ui.add(egui::Slider::new(&mut vox_brush.tex, 0..=64).text(l10n::tr("Material ID")));
                     ui.horizontal(|ui| {
                         if ui
-                            .selectable_label(vox_brush.shape == VoxShape::Isosurface, "Smooth")
+                            .selectable_label(vox_brush.shape == VoxShape::Isosurface, l10n::tr("Smooth"))
                             .clicked()
                         {
                             vox_brush.shape = VoxShape::Isosurface;
                         }
                         if ui
-                            .selectable_label(vox_brush.shape == VoxShape::Cube, "Cube")
+                            .selectable_label(vox_brush.shape == VoxShape::Cube, l10n::tr("Cube"))
                             .clicked()
                         {
                             vox_brush.shape = VoxShape::Cube;
@@ -663,48 +701,52 @@ pub fn ui_world_editor_panel(
                         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
                         .and_then(|d| d.smoothed())
                         .unwrap_or(0.0);
-                    ui.label(format!("FPS: {:.1}", fps));
-                    ui.label(format!("Frame: {:.3} ms", frame_ms));
-                    ui.label(format!("Loaded Chunks: {}", chunk_sys.get_chunks().len()));
-                    ui.label(format!("Surface-First: {}", if cfg.surface_first_meshing { "ON" } else { "OFF" }));
-                    ui.label(format!("Surface-Only: {}", if cfg.surface_only_meshing { "ON" } else { "OFF" }));
-                    ui.label(format!("GPU WorldGen: {}", if cfg.gpu_worldgen { "ON" } else { "OFF" }));
+                    ui.label(format!("{}: {:.1}", l10n::tr("FPS"), fps));
+                    ui.label(format!("{}: {:.3} ms", l10n::tr("Frame"), frame_ms));
+                    ui.label(format!("{}: {}", l10n::tr("Loaded Chunks"), chunk_sys.get_chunks().len()));
+                    ui.label(format!("{}: {}", l10n::tr("Surface-First"), if cfg.surface_first_meshing { l10n::tr("ON") } else { l10n::tr("OFF") }));
+                    ui.label(format!("{}: {}", l10n::tr("Surface-Only"), if cfg.surface_only_meshing { l10n::tr("ON") } else { l10n::tr("OFF") }));
+                    ui.label(format!("{}: {}", l10n::tr("GPU WorldGen"), if cfg.gpu_worldgen { l10n::tr("ON") } else { l10n::tr("OFF") }));
                     if let Some(stats) = meshing_stats {
                         ui.separator();
-                        ui.label(format!("Remesh Queue: {}", stats.remesh_queue));
-                        ui.label(format!("Meshing Inflight: {}", stats.meshing_inflight));
-                        ui.label(format!("Fast Pending Upgrade: {}", stats.fast_pending_upgrade));
+                        ui.label(format!("{}: {}", l10n::tr("Remesh Queue"), stats.remesh_queue));
+                        ui.label(format!("{}: {}", l10n::tr("Meshing Inflight"), stats.meshing_inflight));
+                        ui.label(format!("{}: {}", l10n::tr("Fast Pending Upgrade"), stats.fast_pending_upgrade));
                         ui.label(format!(
-                            "Submitted (S/F): {}/{}",
+                            "{}: {}/{}",
+                            l10n::tr("Submitted (S/F)"),
                             stats.submitted_surface_this_frame,
                             stats.submitted_full_this_frame
                         ));
                         ui.label(format!(
-                            "Completed Total (S/F): {}/{}",
+                            "{}: {}/{}",
+                            l10n::tr("Completed Total (S/F)"),
                             stats.completed_surface_total,
                             stats.completed_full_total
                         ));
                     }
                     if let Some(stats) = worldgen_stats {
                         ui.separator();
-                        ui.label(format!("WorldGen Loading Queue: {}", stats.loading_queue));
-                        ui.label(format!("WorldGen Inflight: {}", stats.loading_inflight));
-                        ui.label(format!("GPU Batch Size: {}", stats.batch_size));
+                        ui.label(format!("{}: {}", l10n::tr("WorldGen Loading Queue"), stats.loading_queue));
+                        ui.label(format!("{}: {}", l10n::tr("WorldGen Inflight"), stats.loading_inflight));
+                        ui.label(format!("{}: {}", l10n::tr("GPU Batch Size"), stats.batch_size));
                         ui.label(format!(
-                            "Submitted This Frame (GPU/CPU): {}/{}",
+                            "{}: {}/{}",
+                            l10n::tr("Submitted This Frame (GPU/CPU)"),
                             stats.submitted_gpu_this_frame,
                             stats.submitted_cpu_this_frame
                         ));
                         ui.label(format!(
-                            "Completed Total (GPU/CPU): {}/{}",
+                            "{}: {}/{}",
+                            l10n::tr("Completed Total (GPU/CPU)"),
                             stats.completed_gpu_total,
                             stats.completed_cpu_total
                         ));
                     }
                 }
                 EditorBottomTab::Assets => {
-                    ui.label("Assets browser placeholder (phase 2).");
-                    ui.small("Next step: add texture/material list and quick-assign actions.");
+                    ui.label(l10n::tr("Assets browser placeholder (phase 2)."));
+                    ui.small(l10n::tr("Next step: add texture/material list and quick-assign actions."));
                 }
             }
         });
@@ -712,7 +754,7 @@ pub fn ui_world_editor_panel(
     egui::SidePanel::left("editor_workspace_hierarchy")
         .default_width(260.0)
         .show(ctx_mut, |ui| {
-            ui.heading("Hierarchy");
+            ui.heading(l10n::tr("Hierarchy"));
             ui.separator();
 
             let mut rows: Vec<(Entity, String)> = editor_queries
@@ -740,7 +782,7 @@ pub fn ui_world_editor_panel(
     egui::SidePanel::right("editor_workspace_inspector")
         .default_width(300.0)
         .show(ctx_mut, |ui| {
-            ui.heading("Inspector");
+            ui.heading(l10n::tr("Inspector"));
             ui.separator();
 
             if let Some(entity) = editor_runtime.selected_entity {
@@ -753,7 +795,7 @@ pub fn ui_world_editor_panel(
                     ui.separator();
 
                     if let Some(trans) = trans {
-                        ui.label("Transform");
+                        ui.label(l10n::tr("Transform"));
                         ui.small(format!(
                             "pos: {:.2}, {:.2}, {:.2}",
                             trans.translation.x, trans.translation.y, trans.translation.z
@@ -761,32 +803,34 @@ pub fn ui_world_editor_panel(
                     }
                     if let Some(gtrans) = gtrans {
                         let pos = gtrans.translation();
-                        ui.label("Global Transform");
+                        ui.label(l10n::tr("Global Transform"));
                         ui.small(format!("pos: {:.2}, {:.2}, {:.2}", pos.x, pos.y, pos.z));
                     }
                 } else {
-                    ui.small("Selected entity is no longer valid.");
+                    ui.small(l10n::tr("Selected entity is no longer valid."));
                     editor_runtime.selected_entity = None;
                 }
             } else {
-                ui.small("Select an entity from Hierarchy.");
+                ui.small(l10n::tr("Select an entity from Hierarchy."));
             }
 
             ui.separator();
-            ui.label("Admin State");
-            ui.small(format!("Role: {}", if cli.is_owner { "Owner" } else { "Admin" }));
+            ui.label(l10n::tr("Admin State"));
+            ui.small(format!("{}: {}", l10n::tr("Role"), if cli.is_owner { l10n::tr("Owner") } else { l10n::tr("Admin") }));
             ui.small(format!(
-                "God: {} | Noclip: {}",
-                if cli.admin_god_enabled { "ON" } else { "OFF" },
-                if cli.admin_noclip_enabled { "ON" } else { "OFF" }
+                "{}: {} | {}: {}",
+                l10n::tr("God"),
+                if cli.admin_god_enabled { l10n::tr("ON") } else { l10n::tr("OFF") },
+                l10n::tr("Noclip"),
+                if cli.admin_noclip_enabled { l10n::tr("ON") } else { l10n::tr("OFF") }
             ));
         });
 
     egui::CentralPanel::default().show(ctx_mut, |ui| {
-        ui.heading("Viewport");
+        ui.heading(l10n::tr("Viewport"));
         if editor_runtime.show_help {
-            ui.small("W/A/S/D + Mouse: fly camera in 3D mode");
-            ui.small("Ctrl + Left/Right Click: sculpt terrain while editor UI is open");
+            ui.small(l10n::tr("W/A/S/D + Mouse: fly camera in 3D mode"));
+            ui.small(l10n::tr("Ctrl + Left/Right Click: sculpt terrain while editor UI is open"));
         }
         ui.separator();
 
@@ -797,7 +841,7 @@ pub fn ui_world_editor_panel(
         ui.label(format!("Loaded Chunks: {}", loaded_count));
 
         if loaded_count == 0 {
-            ui.small("No chunks loaded yet.");
+            ui.small(l10n::tr("No chunks loaded yet."));
             return;
         }
 
@@ -814,13 +858,13 @@ pub fn ui_world_editor_panel(
         ));
 
         ui.horizontal(|ui| {
-            ui.label("Load Radius X");
+            ui.label(l10n::tr("Load Radius X"));
             ui.add(egui::Slider::new(&mut cfg.chunks_load_distance.x, 2..=64));
-            ui.label("Y");
+            ui.label(l10n::tr("Y"));
             ui.add(egui::Slider::new(&mut cfg.chunks_load_distance.y, 1..=32));
-            ui.checkbox(&mut editor_runtime.show_lod_overlay, "LOD Overlay");
+            ui.checkbox(&mut editor_runtime.show_lod_overlay, l10n::tr("LOD Overlay"));
 
-            if ui.button("Focus Loaded Bounds").clicked() {
+            if ui.button(l10n::tr("Focus Loaded Bounds")).clicked() {
                 if let Ok(mut cam) = editor_queries.p0().single_mut() {
                     let cx = ((min.x + max.x) as f32) * 0.5;
                     let cz = ((min.z + max.z) as f32) * 0.5;

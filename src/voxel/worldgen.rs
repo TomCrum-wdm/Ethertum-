@@ -100,6 +100,7 @@ pub fn generate_chunk_fast_kernel(chunk: &mut Chunk, config: &WorldGenConfig, se
     let shell_thickness = config.planet_shell_thickness.max(1.0);
     let noise_scale_2d = config.noise_scale_2d.max(1.0);
     let noise_scale_3d = config.noise_scale_3d.max(1.0);
+    let terrain_shape = config.terrain_solid_shape();
 
     let mut terr_2d = [[0.0_f32; Chunk::LEN as usize]; Chunk::LEN as usize];
     for lz in 0..Chunk::LEN {
@@ -188,7 +189,8 @@ pub fn generate_chunk_fast_kernel(chunk: &mut Chunk, config: &WorldGenConfig, se
                     }
                 };
 
-                *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
+                let shape = if tex == VoxTex::Nil { VoxShape::Isosurface } else { terrain_shape };
+                *chunk.at_voxel_mut(lp) = Vox::new(tex, shape, val);
             }
         }
     }
@@ -213,6 +215,7 @@ pub fn generate_chunk_with_seed(chunk: &mut Chunk, config: &WorldGenConfig, seed
     let shell_thickness = config.planet_shell_thickness.max(1.0);
     let noise_scale_2d = config.noise_scale_2d.max(1.0);
     let noise_scale_3d = config.noise_scale_3d.max(1.0);
+    let terrain_shape = config.terrain_solid_shape();
 
     for ly in 0..Chunk::LEN {
         for lz in 0..Chunk::LEN {
@@ -272,13 +275,18 @@ pub fn generate_chunk_with_seed(chunk: &mut Chunk, config: &WorldGenConfig, seed
                         }
                     }
                 };
-                *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
+                let shape = if tex == VoxTex::Nil { VoxShape::Isosurface } else { terrain_shape };
+                *chunk.at_voxel_mut(lp) = Vox::new(tex, shape, val);
             }
         }
     }
 }
 
 pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
+    if !config.surface_decoration_enabled {
+        return;
+    }
+
     let chunkpos = chunk.chunkpos;
     let perlin = Perlin::new(123);
 
@@ -288,7 +296,7 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
             let mut air_dist = 0;
 
             // check top air_dist. for CubicChunk system, otherwise the chunk-top will be surface/grass
-            for i in 0..3 {
+            for i in 0..config.surface_air_scan_depth {
                 if !chunk.get_voxel_rel_or_default(ivec3(lx, Chunk::LEN + i, lz)).is_nil() {
                     air_dist += 1;
                 }
@@ -307,7 +315,13 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
                 let p = chunk.chunkpos + lp;
                 if c.tex_id == VoxTex::Stone {
                     let mut replace = c.tex_id;
-                    if p.y < 2 && air_dist <= 2 && perlin.get([p.x as f64 / 32., p.z as f64 / 32.]) > 0.1 {
+                    if p.y < config.beach_max_y
+                        && air_dist <= 2
+                        && perlin.get([
+                            p.x as f64 / config.beach_noise_scale.max(1.0) as f64,
+                            p.z as f64 / config.beach_noise_scale.max(1.0) as f64,
+                        ]) > config.beach_noise_threshold as f64
+                    {
                         replace = VoxTex::Sand;
                     } else if air_dist <= 1 {
                         replace = VoxTex::Grass;
@@ -327,18 +341,21 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
 
             // TallGrass
             // hash(x * z * 100) < 0.23
-            let g = perlin.get([x as f64 / 18., z as f64 / 18.]);
+            let g = perlin.get([
+                x as f64 / config.flora_noise_scale.max(1.0) as f64,
+                z as f64 / config.flora_noise_scale.max(1.0) as f64,
+            ]);
             if g > 0.0 {
                 for ly in 0..Chunk::LEN - 1 {
                     let lp = ivec3(lx, ly, lz);
 
                     if chunk.at_voxel(lp).tex_id == VoxTex::Grass && chunk.at_voxel(lp + IVec3::Y).is_nil() {
                         let c = chunk.at_voxel_mut(lp + IVec3::Y);
-                        c.tex_id = if g > 0.94 {
+                        c.tex_id = if g > config.flora_rose_threshold as f64 {
                             VoxTex::Rose
-                        } else if g > 0.8 {
+                        } else if g > config.flora_fern_threshold as f64 {
                             VoxTex::Fern
-                        } else if g > 0.24 {
+                        } else if g > config.flora_bush_threshold as f64 {
                             VoxTex::Bush
                         } else {
                             VoxTex::ShortGrass
@@ -350,12 +367,12 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
             }
 
             // Vines
-            if hash(x ^ (z * 7384)) < (18.0 / 256.0) {
+            if hash(x ^ (z * 7384)) < (config.vine_spawn_per_256 / 256.0) {
                 for ly in 0..Chunk::LEN - 1 {
                     let lp = ivec3(lx, ly, lz);
 
                     if chunk.at_voxel(lp).is_nil() && chunk.at_voxel(lp + IVec3::Y).tex_id == VoxTex::Stone {
-                        for i in 0..(12.0 * hash(x ^ (z * 121))) as i32 {
+                        for i in 0..(config.vine_length_factor * hash(x ^ (z * 121))) as i32 {
                             let lp = lp + IVec3::NEG_Y * i;
                             if lp.y < 0 {
                                 break;
@@ -378,7 +395,7 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
             };
 
             // Trees
-            if allow_trees && hash(x ^ (z * 9572)) < (3.0 / 256.0) {
+            if allow_trees && hash(x ^ (z * 9572)) < (config.tree_spawn_per_256 / 256.0) {
                 for ly in 0..Chunk::LEN {
                     let lp = ivec3(lx, ly, lz);
 
@@ -386,16 +403,16 @@ pub fn populate_chunk(chunk: &mut Chunk, config: &WorldGenConfig) {
                         continue;
                     }
                     let siz = hash(x ^ ly ^ z);
-                    gen_tree(chunk, lp, siz);
+                    gen_tree(chunk, config, lp, siz);
                 }
             }
         }
     }
 }
 
-pub fn gen_tree(chunk: &mut Chunk, lp: IVec3, siz: f32) {
-    let trunk_height = 3 + (siz * 6.0) as i32;
-    let leaves_rad = 2 + (siz * 5.0) as i32;
+pub fn gen_tree(chunk: &mut Chunk, config: &WorldGenConfig, lp: IVec3, siz: f32) {
+    let trunk_height = config.tree_trunk_height_base + (siz * config.tree_trunk_height_var) as i32;
+    let leaves_rad = config.tree_leaves_radius_base + (siz * config.tree_leaves_radius_var) as i32;
 
     // Leaves
     iter::iter_aabb(leaves_rad, leaves_rad, |rp| {
@@ -418,12 +435,12 @@ pub fn gen_tree(chunk: &mut Chunk, lp: IVec3, siz: f32) {
 
     // Trunk
     for i in 0..trunk_height {
-        if i + lp.y > 15 {
+        if i + lp.y > config.tree_local_height_cap {
             break;
         }
         let c = chunk.at_voxel_mut(lp + IVec3::Y * i);
         c.tex_id = VoxTex::Log;
-        c.shape_id = VoxShape::Isosurface;
+        c.shape_id = config.terrain_solid_shape();
         c.set_isovalue(2.0 * (1.2 - i as f32 / trunk_height as f32));
     }
 }

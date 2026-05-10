@@ -14,6 +14,7 @@ pub use chunk::Chunk;
 pub use chunk_storage::{
     ActiveWorld,
     ChunkStore,
+    WorldBaseVoxelStyle,
     LocalWorldInfo,
     WorldGenBackendPreference,
     WorldGenConfig,

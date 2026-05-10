@@ -190,6 +190,11 @@ pub struct GamepadControlsConfig {
     pub button_sprint: String,
     pub button_use: String,
     pub button_attack: String,
+    pub rumble_debug_enabled: bool,
+    pub rumble_weak_motor: f32,
+    pub rumble_strong_motor: f32,
+    pub rumble_duration_ms: u32,
+    pub rumble_preset: u8,
 }
 
 impl Default for GamepadControlsConfig {
@@ -203,6 +208,11 @@ impl Default for GamepadControlsConfig {
             button_sprint: "LeftThumb".to_string(),
             button_use: "RightTrigger2".to_string(),
             button_attack: "RightTrigger".to_string(),
+            rumble_debug_enabled: true,
+            rumble_weak_motor: 0.35,
+            rumble_strong_motor: 0.55,
+            rumble_duration_ms: 220,
+            rumble_preset: 0,
         }
     }
 }
@@ -253,8 +263,13 @@ pub struct ClientSettings {
     pub vsync: bool,
     pub high_quality_rendering: bool,
     pub touch_ui: bool,
+    pub touch_menu_tile_overlay_strength: f32,
+    pub touch_tile_style: TouchTileStyle,
+    pub touch_tile_style_overlay_enabled: bool,
+    pub touch_tile_style_window_alpha: f32,
     pub show_level_indicator: bool,
     pub show_pitch_indicator: bool,
+    pub language: String,
 
     pub chunks_load_distance: IVec2,
     pub surface_first_meshing: bool,
@@ -289,8 +304,13 @@ impl Default for ClientSettings {
             vsync: true,
             high_quality_rendering: true,
             touch_ui: true,
+            touch_menu_tile_overlay_strength: 0.38,
+            touch_tile_style: TouchTileStyle::default(),
+            touch_tile_style_overlay_enabled: false,
+            touch_tile_style_window_alpha: 0.9,
             show_level_indicator: true,
             show_pitch_indicator: true,
+            language: "en-US".to_string(),
 
             chunks_load_distance: IVec2::new(4, 3),
             surface_first_meshing: true,
@@ -317,6 +337,10 @@ impl ClientSettings {
     pub fn sanitize(&mut self) {
         self.fov = self.fov.clamp(10.0, 170.0);
         self.hud_padding = self.hud_padding.clamp(0.0, 128.0);
+        self.touch_menu_tile_overlay_strength = self.touch_menu_tile_overlay_strength.clamp(0.0, 0.9);
+        self.language = crate::client::l10n::normalize_language(&self.language).to_string();
+
+        self.touch_tile_style_window_alpha = self.touch_tile_style_window_alpha.clamp(0.0, 1.0);
 
         self.chunks_load_distance.x = self.chunks_load_distance.x.max(2);
         self.chunks_load_distance.y = self.chunks_load_distance.y.max(1);
@@ -331,6 +355,39 @@ impl ClientSettings {
         self.gpu_worldgen_adaptive_mult_high = self.gpu_worldgen_adaptive_mult_high.max(self.gpu_worldgen_adaptive_mult_mid);
         self.gpu_worldgen_adaptive_batch_min = self.gpu_worldgen_adaptive_batch_min.max(1);
         self.gpu_worldgen_adaptive_batch_max = self.gpu_worldgen_adaptive_batch_max.max(self.gpu_worldgen_adaptive_batch_min);
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Reflect)]
+#[serde(default)]
+#[reflect(Default)]
+pub struct TouchTileStyle {
+    pub background_mode: TileBackgroundMode,
+    pub corner_radius: f32,
+    pub icon_scale: f32,
+    pub preload_rasterized: bool,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Eq, Reflect)]
+pub enum TileBackgroundMode {
+    Cover,
+    Contain,
+}
+
+impl Default for TouchTileStyle {
+    fn default() -> Self {
+        Self {
+            background_mode: TileBackgroundMode::Cover,
+            corner_radius: 6.0,
+            icon_scale: 1.0,
+            preload_rasterized: true,
+        }
+    }
+}
+
+impl Default for TileBackgroundMode {
+    fn default() -> Self {
+        TileBackgroundMode::Cover
     }
 }
 

@@ -1,0 +1,15 @@
+Timestamp: SystemTime { intervals: 134208976613920963 }
+Asset States:
+  albedo: Some(Loaded)
+    size: (6144, 256, 1), texture_format: Rgba8UnormSrgb
+  normal: Some(Loaded)
+    size: (6144, 256, 1), texture_format: Rgba8Unorm
+  dram: Some(Loaded)
+    size: (6144, 256, 1), texture_format: Rgba8UnormSrgb
+  foliage: Some(Loaded)
+    size: (6144, 256, 1), texture_format: Rgba8UnormSrgb
+  water_norm: Some(Loaded)
+    size: (512, 512, 1), texture_format: Rgba8Unorm
+Chunks Loaded: 1392
+Meshes: 6838
+Terrain Materials: 1

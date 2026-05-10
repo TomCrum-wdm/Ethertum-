@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 use futures_lite::future;
 
-use super::{Chunk, Vox, VoxShape, WorldGenConfig, WorldTerrainMode};
+use super::{Chunk, Vox, VoxShape, VoxTex, WorldGenConfig, WorldTerrainMode};
 
 const SHADER_SOURCE: &str = include_str!("worldgen_compute.wgsl");
 
@@ -175,6 +175,7 @@ fn gpu_context() -> anyhow::Result<&'static GpuWorldgenContext> {
 fn generate_chunks_gpu_native(chunk_positions: &[IVec3], config: &WorldGenConfig, seed: u64) -> anyhow::Result<Vec<Chunk>> {
     let mut cfg = config.clone();
     cfg.sanitize();
+    let terrain_shape = cfg.terrain_solid_shape();
     let ctx = gpu_context()?;
     let device = &ctx.device;
     let queue = &ctx.queue;
@@ -343,7 +344,8 @@ fn generate_chunks_gpu_native(chunk_positions: &[IVec3], config: &WorldGenConfig
             let val = f32::from_bits(packed[base + local_idx * 2]);
             let tex = packed[base + local_idx * 2 + 1] as u16;
             let lp = Chunk::local_idx_pos(local_idx as i32);
-            *chunk.at_voxel_mut(lp) = Vox::new(tex, VoxShape::Isosurface, val);
+            let shape = if tex == VoxTex::Nil { VoxShape::Isosurface } else { terrain_shape };
+            *chunk.at_voxel_mut(lp) = Vox::new(tex, shape, val);
         }
 
         out.push(chunk);

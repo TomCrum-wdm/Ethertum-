@@ -47,11 +47,19 @@ pub enum WorldGenBackendPreference {
     GpuFast,
 }
 
+#[derive(Serialize, Deserialize, Default, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+pub enum WorldBaseVoxelStyle {
+    #[default]
+    SmoothIsosurface,
+    BlockyCube,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Reflect)]
 #[serde(default)]
 pub struct WorldGenConfig {
     pub terrain_mode: WorldTerrainMode,
     pub worldgen_backend: WorldGenBackendPreference,
+    pub base_voxel_style: WorldBaseVoxelStyle,
     pub fbm_octaves: u8,
     pub noise_scale_2d: f32,
     pub noise_scale_3d: f32,
@@ -73,6 +81,28 @@ pub struct WorldGenConfig {
 
     pub gravity_acceleration: f32,
     pub spawn_surface_offset: f32,
+
+    pub surface_decoration_enabled: bool,
+    pub surface_air_scan_depth: i32,
+
+    pub beach_max_y: i32,
+    pub beach_noise_scale: f32,
+    pub beach_noise_threshold: f32,
+
+    pub flora_noise_scale: f32,
+    pub flora_bush_threshold: f32,
+    pub flora_fern_threshold: f32,
+    pub flora_rose_threshold: f32,
+
+    pub vine_spawn_per_256: f32,
+    pub vine_length_factor: f32,
+
+    pub tree_spawn_per_256: f32,
+    pub tree_trunk_height_base: i32,
+    pub tree_trunk_height_var: f32,
+    pub tree_leaves_radius_base: i32,
+    pub tree_leaves_radius_var: f32,
+    pub tree_local_height_cap: i32,
 }
 
 impl Default for WorldGenConfig {
@@ -80,6 +110,7 @@ impl Default for WorldGenConfig {
         Self {
             terrain_mode: WorldTerrainMode::Planet,
             worldgen_backend: WorldGenBackendPreference::Auto,
+            base_voxel_style: WorldBaseVoxelStyle::SmoothIsosurface,
             fbm_octaves: 5,
             noise_scale_2d: 130.0,
             noise_scale_3d: 90.0,
@@ -101,6 +132,28 @@ impl Default for WorldGenConfig {
 
             gravity_acceleration: 19.62,
             spawn_surface_offset: 64.0,
+
+            surface_decoration_enabled: true,
+            surface_air_scan_depth: 3,
+
+            beach_max_y: 2,
+            beach_noise_scale: 32.0,
+            beach_noise_threshold: 0.1,
+
+            flora_noise_scale: 18.0,
+            flora_bush_threshold: 0.24,
+            flora_fern_threshold: 0.8,
+            flora_rose_threshold: 0.94,
+
+            vine_spawn_per_256: 18.0,
+            vine_length_factor: 12.0,
+
+            tree_spawn_per_256: 3.0,
+            tree_trunk_height_base: 3,
+            tree_trunk_height_var: 6.0,
+            tree_leaves_radius_base: 2,
+            tree_leaves_radius_var: 5.0,
+            tree_local_height_cap: 15,
         }
     }
 }
@@ -125,6 +178,36 @@ impl WorldGenConfig {
 
         self.gravity_acceleration = sanitize_f32(self.gravity_acceleration, 19.62).clamp(0.0, 200.0);
         self.spawn_surface_offset = sanitize_f32(self.spawn_surface_offset, 64.0).clamp(0.0, 20_000.0);
+
+        self.surface_air_scan_depth = self.surface_air_scan_depth.clamp(1, 16);
+
+        self.beach_max_y = self.beach_max_y.clamp(-4096, 4096);
+        self.beach_noise_scale = sanitize_f32(self.beach_noise_scale, 32.0).clamp(1.0, 100_000.0);
+        self.beach_noise_threshold = sanitize_f32(self.beach_noise_threshold, 0.1).clamp(-1.0, 1.0);
+
+        self.flora_noise_scale = sanitize_f32(self.flora_noise_scale, 18.0).clamp(1.0, 100_000.0);
+        self.flora_bush_threshold = sanitize_f32(self.flora_bush_threshold, 0.24).clamp(-1.0, 1.0);
+        self.flora_fern_threshold = sanitize_f32(self.flora_fern_threshold, 0.8)
+            .clamp(self.flora_bush_threshold, 1.0);
+        self.flora_rose_threshold = sanitize_f32(self.flora_rose_threshold, 0.94)
+            .clamp(self.flora_fern_threshold, 1.0);
+
+        self.vine_spawn_per_256 = sanitize_f32(self.vine_spawn_per_256, 18.0).clamp(0.0, 256.0);
+        self.vine_length_factor = sanitize_f32(self.vine_length_factor, 12.0).clamp(0.0, 128.0);
+
+        self.tree_spawn_per_256 = sanitize_f32(self.tree_spawn_per_256, 3.0).clamp(0.0, 256.0);
+        self.tree_trunk_height_base = self.tree_trunk_height_base.clamp(1, 64);
+        self.tree_trunk_height_var = sanitize_f32(self.tree_trunk_height_var, 6.0).clamp(0.0, 64.0);
+        self.tree_leaves_radius_base = self.tree_leaves_radius_base.clamp(1, 32);
+        self.tree_leaves_radius_var = sanitize_f32(self.tree_leaves_radius_var, 5.0).clamp(0.0, 32.0);
+        self.tree_local_height_cap = self.tree_local_height_cap.clamp(1, 128);
+    }
+
+    pub fn terrain_solid_shape(&self) -> VoxShape {
+        match self.base_voxel_style {
+            WorldBaseVoxelStyle::SmoothIsosurface => VoxShape::Isosurface,
+            WorldBaseVoxelStyle::BlockyCube => VoxShape::Cube,
+        }
     }
 
     pub fn world_up_at(&self, pos: Vec3) -> Vec3 {

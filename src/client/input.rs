@@ -422,7 +422,7 @@ pub fn input_handle(
     // Vsync
     window.present_mode = if cfg.vsync { PresentMode::AutoVsync } else { PresentMode::AutoNoVsync };
 
-    crate::ui::set_window_size(Vec2::new(window.resolution.width(), window.resolution.height()));
+    // Window size is updated by the UI resize event handler; avoid per-frame updates here.
 }
 
 // // TouchStick  Move-Left

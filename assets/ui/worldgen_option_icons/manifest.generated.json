@@ -1,0 +1,389 @@
+﻿[
+    {
+        "option":  "Name:",
+        "slug":  "name",
+        "svg":  "assets/ui/worldgen_option_icons/name.svg",
+        "png":  "assets/ui/worldgen_option_icons/name.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Name:"
+    },
+    {
+        "option":  "World Type:",
+        "slug":  "world_type",
+        "svg":  "assets/ui/worldgen_option_icons/world_type.svg",
+        "png":  "assets/ui/worldgen_option_icons/world_type.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "World Type:"
+    },
+    {
+        "option":  "Seed Mode:",
+        "slug":  "seed_mode",
+        "svg":  "assets/ui/worldgen_option_icons/seed_mode.svg",
+        "png":  "assets/ui/worldgen_option_icons/seed_mode.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Seed Mode:"
+    },
+    {
+        "option":  "Seed Number (u64):",
+        "slug":  "seed_number_u64",
+        "svg":  "assets/ui/worldgen_option_icons/seed_number_u64.svg",
+        "png":  "assets/ui/worldgen_option_icons/seed_number_u64.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Seed Number (u64):"
+    },
+    {
+        "option":  "Seed Hex (u64):",
+        "slug":  "seed_hex_u64",
+        "svg":  "assets/ui/worldgen_option_icons/seed_hex_u64.svg",
+        "png":  "assets/ui/worldgen_option_icons/seed_hex_u64.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Seed Hex (u64):"
+    },
+    {
+        "option":  "Seed Text:",
+        "slug":  "seed_text",
+        "svg":  "assets/ui/worldgen_option_icons/seed_text.svg",
+        "png":  "assets/ui/worldgen_option_icons/seed_text.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Seed Text:"
+    },
+    {
+        "option":  "Random Seed:",
+        "slug":  "random_seed",
+        "svg":  "assets/ui/worldgen_option_icons/random_seed.svg",
+        "png":  "assets/ui/worldgen_option_icons/random_seed.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Random Seed:"
+    },
+    {
+        "option":  "Seed Text (combined with world name):",
+        "slug":  "seed_text_combined_with_world_name",
+        "svg":  "assets/ui/worldgen_option_icons/seed_text_combined_with_world_name.svg",
+        "png":  "assets/ui/worldgen_option_icons/seed_text_combined_with_world_name.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Seed Text (combined with world name):"
+    },
+    {
+        "option":  "FBM Octaves",
+        "slug":  "fbm_octaves",
+        "svg":  "assets/ui/worldgen_option_icons/fbm_octaves.svg",
+        "png":  "assets/ui/worldgen_option_icons/fbm_octaves.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "FBM Octaves"
+    },
+    {
+        "option":  "Noise Scale 2D",
+        "slug":  "noise_scale_2d",
+        "svg":  "assets/ui/worldgen_option_icons/noise_scale_2d.svg",
+        "png":  "assets/ui/worldgen_option_icons/noise_scale_2d.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Noise Scale 2D"
+    },
+    {
+        "option":  "Noise Scale 3D",
+        "slug":  "noise_scale_3d",
+        "svg":  "assets/ui/worldgen_option_icons/noise_scale_3d.svg",
+        "png":  "assets/ui/worldgen_option_icons/noise_scale_3d.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Noise Scale 3D"
+    },
+    {
+        "option":  "Gravity (m/s虏)",
+        "slug":  "gravity_m_s",
+        "svg":  "assets/ui/worldgen_option_icons/gravity_m_s.svg",
+        "png":  "assets/ui/worldgen_option_icons/gravity_m_s.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Gravity (m/s虏)"
+    },
+    {
+        "option":  "Spawn Surface Offset",
+        "slug":  "spawn_surface_offset",
+        "svg":  "assets/ui/worldgen_option_icons/spawn_surface_offset.svg",
+        "png":  "assets/ui/worldgen_option_icons/spawn_surface_offset.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Spawn Surface Offset"
+    },
+    {
+        "option":  "Generation Backend",
+        "slug":  "generation_backend",
+        "svg":  "assets/ui/worldgen_option_icons/generation_backend.svg",
+        "png":  "assets/ui/worldgen_option_icons/generation_backend.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Generation Backend"
+    },
+    {
+        "option":  "Base Terrain Voxel Style",
+        "slug":  "base_terrain_voxel_style",
+        "svg":  "assets/ui/worldgen_option_icons/base_terrain_voxel_style.svg",
+        "png":  "assets/ui/worldgen_option_icons/base_terrain_voxel_style.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Base Terrain Voxel Style"
+    },
+    {
+        "option":  "Height Divisor",
+        "slug":  "height_divisor",
+        "svg":  "assets/ui/worldgen_option_icons/height_divisor.svg",
+        "png":  "assets/ui/worldgen_option_icons/height_divisor.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Height Divisor"
+    },
+    {
+        "option":  "3D Noise Strength",
+        "slug":  "3d_noise_strength",
+        "svg":  "assets/ui/worldgen_option_icons/3d_noise_strength.svg",
+        "png":  "assets/ui/worldgen_option_icons/3d_noise_strength.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "3D Noise Strength"
+    },
+    {
+        "option":  "Water Level (Y)",
+        "slug":  "water_level_y",
+        "svg":  "assets/ui/worldgen_option_icons/water_level_y.svg",
+        "png":  "assets/ui/worldgen_option_icons/water_level_y.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Water Level (Y)"
+    },
+    {
+        "option":  "Ground Level (Y)",
+        "slug":  "ground_level_y",
+        "svg":  "assets/ui/worldgen_option_icons/ground_level_y.svg",
+        "png":  "assets/ui/worldgen_option_icons/ground_level_y.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Ground Level (Y)"
+    },
+    {
+        "option":  "Dirt Depth",
+        "slug":  "dirt_depth",
+        "svg":  "assets/ui/worldgen_option_icons/dirt_depth.svg",
+        "png":  "assets/ui/worldgen_option_icons/dirt_depth.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Dirt Depth"
+    },
+    {
+        "option":  "Generate Trees",
+        "slug":  "generate_trees",
+        "svg":  "assets/ui/worldgen_option_icons/generate_trees.svg",
+        "png":  "assets/ui/worldgen_option_icons/generate_trees.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Generate Trees"
+    },
+    {
+        "option":  "Planet Radius",
+        "slug":  "planet_radius",
+        "svg":  "assets/ui/worldgen_option_icons/planet_radius.svg",
+        "png":  "assets/ui/worldgen_option_icons/planet_radius.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Planet Radius"
+    },
+    {
+        "option":  "Planet Center",
+        "slug":  "planet_center",
+        "svg":  "assets/ui/worldgen_option_icons/planet_center.svg",
+        "png":  "assets/ui/worldgen_option_icons/planet_center.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Planet Center"
+    },
+    {
+        "option":  "Shell Thickness",
+        "slug":  "shell_thickness",
+        "svg":  "assets/ui/worldgen_option_icons/shell_thickness.svg",
+        "png":  "assets/ui/worldgen_option_icons/shell_thickness.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Shell Thickness"
+    },
+    {
+        "option":  "Planet 3D Noise Strength",
+        "slug":  "planet_3d_noise_strength",
+        "svg":  "assets/ui/worldgen_option_icons/planet_3d_noise_strength.svg",
+        "png":  "assets/ui/worldgen_option_icons/planet_3d_noise_strength.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Planet 3D Noise Strength"
+    },
+    {
+        "option":  "Planet Inner Water",
+        "slug":  "planet_inner_water",
+        "svg":  "assets/ui/worldgen_option_icons/planet_inner_water.svg",
+        "png":  "assets/ui/worldgen_option_icons/planet_inner_water.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Planet Inner Water"
+    },
+    {
+        "option":  "Enable Surface Decoration",
+        "slug":  "enable_surface_decoration",
+        "svg":  "assets/ui/worldgen_option_icons/enable_surface_decoration.svg",
+        "png":  "assets/ui/worldgen_option_icons/enable_surface_decoration.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Enable Surface Decoration"
+    },
+    {
+        "option":  "Surface Air Scan Depth",
+        "slug":  "surface_air_scan_depth",
+        "svg":  "assets/ui/worldgen_option_icons/surface_air_scan_depth.svg",
+        "png":  "assets/ui/worldgen_option_icons/surface_air_scan_depth.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Surface Air Scan Depth"
+    },
+    {
+        "option":  "Beach Max Y",
+        "slug":  "beach_max_y",
+        "svg":  "assets/ui/worldgen_option_icons/beach_max_y.svg",
+        "png":  "assets/ui/worldgen_option_icons/beach_max_y.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Beach Max Y"
+    },
+    {
+        "option":  "Beach Noise Scale",
+        "slug":  "beach_noise_scale",
+        "svg":  "assets/ui/worldgen_option_icons/beach_noise_scale.svg",
+        "png":  "assets/ui/worldgen_option_icons/beach_noise_scale.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Beach Noise Scale"
+    },
+    {
+        "option":  "Beach Noise Threshold",
+        "slug":  "beach_noise_threshold",
+        "svg":  "assets/ui/worldgen_option_icons/beach_noise_threshold.svg",
+        "png":  "assets/ui/worldgen_option_icons/beach_noise_threshold.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Beach Noise Threshold"
+    },
+    {
+        "option":  "Flora Noise Scale",
+        "slug":  "flora_noise_scale",
+        "svg":  "assets/ui/worldgen_option_icons/flora_noise_scale.svg",
+        "png":  "assets/ui/worldgen_option_icons/flora_noise_scale.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Flora Noise Scale"
+    },
+    {
+        "option":  "Bush Threshold",
+        "slug":  "bush_threshold",
+        "svg":  "assets/ui/worldgen_option_icons/bush_threshold.svg",
+        "png":  "assets/ui/worldgen_option_icons/bush_threshold.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Bush Threshold"
+    },
+    {
+        "option":  "Fern Threshold",
+        "slug":  "fern_threshold",
+        "svg":  "assets/ui/worldgen_option_icons/fern_threshold.svg",
+        "png":  "assets/ui/worldgen_option_icons/fern_threshold.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Fern Threshold"
+    },
+    {
+        "option":  "Rose Threshold",
+        "slug":  "rose_threshold",
+        "svg":  "assets/ui/worldgen_option_icons/rose_threshold.svg",
+        "png":  "assets/ui/worldgen_option_icons/rose_threshold.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Rose Threshold"
+    },
+    {
+        "option":  "Vine Spawn (/256)",
+        "slug":  "vine_spawn_256",
+        "svg":  "assets/ui/worldgen_option_icons/vine_spawn_256.svg",
+        "png":  "assets/ui/worldgen_option_icons/vine_spawn_256.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Vine Spawn (/256)"
+    },
+    {
+        "option":  "Vine Length Factor",
+        "slug":  "vine_length_factor",
+        "svg":  "assets/ui/worldgen_option_icons/vine_length_factor.svg",
+        "png":  "assets/ui/worldgen_option_icons/vine_length_factor.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Vine Length Factor"
+    },
+    {
+        "option":  "Tree Spawn (/256)",
+        "slug":  "tree_spawn_256",
+        "svg":  "assets/ui/worldgen_option_icons/tree_spawn_256.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_spawn_256.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Spawn (/256)"
+    },
+    {
+        "option":  "Tree Trunk Height Base",
+        "slug":  "tree_trunk_height_base",
+        "svg":  "assets/ui/worldgen_option_icons/tree_trunk_height_base.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_trunk_height_base.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Trunk Height Base"
+    },
+    {
+        "option":  "Tree Trunk Height Variance",
+        "slug":  "tree_trunk_height_variance",
+        "svg":  "assets/ui/worldgen_option_icons/tree_trunk_height_variance.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_trunk_height_variance.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Trunk Height Variance"
+    },
+    {
+        "option":  "Tree Leaf Radius Base",
+        "slug":  "tree_leaf_radius_base",
+        "svg":  "assets/ui/worldgen_option_icons/tree_leaf_radius_base.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_leaf_radius_base.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Leaf Radius Base"
+    },
+    {
+        "option":  "Tree Leaf Radius Variance",
+        "slug":  "tree_leaf_radius_variance",
+        "svg":  "assets/ui/worldgen_option_icons/tree_leaf_radius_variance.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_leaf_radius_variance.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Leaf Radius Variance"
+    },
+    {
+        "option":  "Tree Local Height Cap",
+        "slug":  "tree_local_height_cap",
+        "svg":  "assets/ui/worldgen_option_icons/tree_local_height_cap.svg",
+        "png":  "assets/ui/worldgen_option_icons/tree_local_height_cap.png",
+        "replaceable":  true,
+        "license":  "Project-generated original icon, free commercial use",
+        "keyword":  "Tree Local Height Cap"
+    }
+]

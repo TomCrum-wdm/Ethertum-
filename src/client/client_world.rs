@@ -1,6 +1,12 @@
 use std::f32::consts::PI;
 
 use bevy::light::{VolumetricFog, VolumetricLight};
+use bevy::post_process::bloom::Bloom;
+use bevy::anti_alias::fxaa::Fxaa;
+use bevy::core_pipeline::Skybox;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::prelude::EnvironmentMapLight;
+use bevy::pbr::ScreenSpaceReflections;
 use bevy_renet::netcode::NetcodeClientTransport;
 use bevy_renet::renet::RenetClient;
 
@@ -118,7 +124,9 @@ pub(crate) struct Sun;
 
 fn on_world_init(
     mut cmds: Commands,
-    _asset_server: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
+    cli: Res<ClientInfo>,
+    query_cam: Query<Entity, With<CharacterControllerCamera>>,
 ) {
     info!("Load World. setup Player, Camera, Sun.");
 
@@ -134,6 +142,89 @@ fn on_world_init(
         Name::new("Sun"),
         DespawnOnWorldUnload,
     ));
+
+    // Load skybox cubemap and attach to existing camera (if any) or spawn a world camera.
+    // This ensures the cubemap is only loaded when a world actually initializes, and
+    // avoids creating heavy GPU textures while in menus.
+    let skybox_image = asset_server.load("table_mountain_2_puresky_4k_cubemap.jpg");
+    cmds.insert_resource(SkyboxCubemap {
+        is_loaded: false,
+        image_handle: skybox_image.clone(),
+    });
+
+    if let Some(cam_entity) = query_cam.iter().next() {
+        // Attach skybox and effects to existing camera (e.g. menu fallback camera)
+        cmds.entity(cam_entity)
+            .insert(Skybox {
+                image: skybox_image.clone(),
+                brightness: 1000.0,
+                ..Default::default()
+            })
+            .insert(EnvironmentMapLight {
+                diffuse_map: skybox_image.clone(),
+                specular_map: skybox_image.clone(),
+                intensity: 1000.0,
+                ..Default::default()
+            })
+            .insert(ScreenSpaceReflections::default())
+            .insert(Fxaa::default())
+            .insert(Tonemapping::TonyMcMapface)
+            .insert(Bloom::default())
+            .insert(VolumetricFog {
+                ambient_color: Color::linear_rgb(
+                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                ),
+                ambient_intensity: volumetric_fog_intensity_from_density(cli.volumetric_fog_density),
+                ..default()
+            });
+    } else {
+        // No existing camera; spawn a full-featured world camera with skybox and effects.
+        let mut camera_entity = cmds.spawn((
+            Camera3d::default(),
+            Camera {
+                order: 0,
+                ..default()
+            },
+            bevy::render::view::Hdr,
+            bevy::core_pipeline::prepass::DepthPrepass,
+            bevy::core_pipeline::prepass::DeferredPrepass,
+            bevy::core_pipeline::prepass::NormalPrepass,
+            DistanceFog {
+                ..default()
+            },
+            Skybox {
+                image: skybox_image.clone(),
+                brightness: 1000.0,
+                ..Default::default()
+            },
+            EnvironmentMapLight {
+                diffuse_map: skybox_image.clone(),
+                specular_map: skybox_image.clone(),
+                intensity: 1000.0,
+                ..Default::default()
+            },
+            CharacterControllerCamera,
+            Name::new("Camera"),
+            Msaa::Off,
+        ));
+
+        camera_entity
+            .insert(ScreenSpaceReflections::default())
+            .insert(Fxaa::default())
+            .insert(Tonemapping::TonyMcMapface)
+            .insert(Bloom::default())
+            .insert(VolumetricFog {
+                ambient_color: Color::linear_rgb(
+                    cli.volumetric_fog_color.x.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.y.clamp(0.0, 1.0),
+                    cli.volumetric_fog_color.z.clamp(0.0, 1.0),
+                ),
+                ambient_intensity: volumetric_fog_intensity_from_density(cli.volumetric_fog_density),
+                ..default()
+            });
+    }
 }
 
 fn on_world_exit(

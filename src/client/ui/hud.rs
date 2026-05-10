@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::{client::client_world::ClientPlayerInfo, prelude::*, voxel::{ChunkSystem, ClientChunkSystem, VoxShape, VoxelBrush}};
+use crate::client::l10n;
 
 use bevy_egui::{
     egui::{text::CCursorRange, Align, Frame, Id, Layout, TextEdit},
@@ -26,7 +27,7 @@ use crate::{
 use super::{new_egui_window, settings::ui_setting_line};
 use super::items::{draw_place_voxel, item_sort_key, placeable_voxel_defs, InventoryOperation};
 
-// todo: Res是什么原理？每次sys调用会deep拷贝吗？还是传递指针？如果deep clone这么多消息记录 估计会很浪费性能。
+// TODO: understand Res semantics; if this were deep-cloned every system call, chat history copies would be expensive.
 
 #[derive(Resource, Default, Debug)]
 pub struct ChatHistory {
@@ -50,7 +51,7 @@ fn set_cursor_pos(ctx: &egui::Context, id: egui::Id, pos: usize) {
 
 fn safe_unit_vec3_hud(v: Vec3, fallback: Vec3) -> Vec3 {
     let n = v.normalize_or_zero();
-    if n.length_squared() <= 1e-6 || !n.is_finite() {
+    if n == Vec3::ZERO {
         fallback
     } else {
         n
@@ -131,7 +132,7 @@ pub fn hud_chat(
         return;
     }
 
-    egui::Window::new("Chat")
+    egui::Window::new(l10n::tr("Chat"))
         .default_size([620., 320.])
         .title_bar(false)
         .resizable(true)
@@ -277,7 +278,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
         return;
     };
 
-    // new_egui_window("VoxBrush")
+    // new_egui_window(l10n::tr("VoxBrush"))
     //     .anchor(Align2::LEFT_BOTTOM, [cfg.hud_padding, -cfg.hud_padding])
     //     .frame(Frame::default().fill(Color32::from_black_alpha(30)))
     //     .show(ctx.ctx_mut(), |ui| {
@@ -288,13 +289,13 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
 
     //         // ui.painter().image(ctx.add_image(chunk_sys.mtl_terrain), rect, uv, tint)
 
-    //         if ui.btn("Cube").clicked() {
+    //         if ui.btn(l10n::tr("Cube")).clicked() {
     //             voxbrush.size = 1.;
     //             voxbrush.shape = VoxShape::Cube;
     //         }
     //     });
 
-    egui::Window::new("HUD Hotbar")
+    egui::Window::new(l10n::tr("HUD Hotbar"))
         .title_bar(false)
         .resizable(false)
         .anchor(Align2::CENTER_BOTTOM, [0., -cfg.hud_padding])
@@ -365,7 +366,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
                             let tint = hud_operation_color(InventoryOperation::Place);
                             let mut resp = sfx_play(ui.add_sized(
                                 [50.0, 50.0],
-                                egui::Button::new("")
+                                egui::Button::new(l10n::tr(""))
                                     .fill(if active {
                                         Color32::from_rgba_premultiplied(tint.r(), tint.g(), tint.b(), 120)
                                     } else {
@@ -381,7 +382,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
                                 voxbrush.shape = def.shape;
                             }
                         } else {
-                            ui.add_sized([50.0, 50.0], egui::Button::new(""));
+                            ui.add_sized([50.0, 50.0], egui::Button::new(l10n::tr("")));
                         }
                     }
                 } else {
@@ -409,7 +410,7 @@ pub fn hud_hotbar(mut ctx: EguiContexts, cfg: Res<ClientSettings>, mut player: R
                                 ui_item_stack(ui, item, slot_idx, &items, &mut inv_ui_state);
                             }
                         } else {
-                            ui.add_sized([50.0, 50.0], egui::Button::new(""));
+                            ui.add_sized([50.0, 50.0], egui::Button::new(l10n::tr("")));
                         }
                     }
                 }
@@ -438,7 +439,7 @@ pub fn hud_playerlist(
         return;
     };
 
-    egui::Window::new("PlayerList")
+    egui::Window::new(l10n::tr("PlayerList"))
         .title_bar(false)
         .resizable(false)
         .anchor(Align2::CENTER_TOP, [0., cfg.hud_padding])
@@ -456,7 +457,7 @@ pub fn hud_playerlist(
                 });
             }
             // ui.separator();
-            // ui.label("Server MOTD Footer Test");
+            // ui.label(l10n::tr("Server MOTD Footer Test"));
 
             // Lock Focus when pressing Tab
             ui.memory_mut(|m| m.request_focus(Id::NULL));
@@ -495,7 +496,7 @@ pub fn hud_attitude_indicators(
     let roll_deg = roll_rad.to_degrees();
     let pitch_deg = look_dir.dot(local_up).clamp(-1.0, 1.0).asin().to_degrees();
 
-    egui::Window::new("Attitude Indicators")
+    egui::Window::new(l10n::tr("Attitude Indicators"))
         .title_bar(false)
         .resizable(false)
         .collapsible(false)
@@ -511,7 +512,7 @@ pub fn hud_attitude_indicators(
             ui.set_min_width(236.0);
 
             if cfg.show_level_indicator {
-                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("Level: {:+.1}°", roll_deg));
+                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("{}: {:+.1}°", l10n::tr("Level"), roll_deg));
 
                 let size = egui::vec2(220.0, 112.0);
                 let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -551,7 +552,7 @@ pub fn hud_attitude_indicators(
             }
 
             if cfg.show_pitch_indicator {
-                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("Pitch: {:+.1}°", pitch_deg));
+                ui.colored_label(Color32::from_rgb(200, 230, 255), format!("{}: {:+.1}°", l10n::tr("Pitch"), pitch_deg));
                 let pitch_norm = ((pitch_deg + 90.0) / 180.0).clamp(0.0, 1.0);
                 ui.add(
                     egui::ProgressBar::new(pitch_norm)
@@ -706,7 +707,7 @@ pub fn hud_touch_sticks(
         painter.text(
             lock_pos,
             egui::Align2::CENTER_CENTER,
-            "RUN LOCK",
+            l10n::tr("RUN LOCK"),
             egui::FontId::proportional(13.0),
             Color32::from_rgb(255, 220, 130),
         );
@@ -793,8 +794,8 @@ pub fn hud_touch_sticks(
             });
     };
 
-    draw_operation_selector("pick_as_op", &mut touch_cfg.attack_button_pos, InventoryOperation::Mine, "MINE");
-    draw_operation_selector("use_as_op", &mut touch_cfg.use_button_pos, InventoryOperation::Place, "PLACE");
+    draw_operation_selector("pick_as_op", &mut touch_cfg.attack_button_pos, InventoryOperation::Mine, l10n::tr("MINE"));
+    draw_operation_selector("use_as_op", &mut touch_cfg.use_button_pos, InventoryOperation::Place, l10n::tr("PLACE"));
     if is_flying {
         let slider_center = to_pos(touch_cfg.vertical_slider_pos);
         let slider_h = touch_cfg.vertical_slider_height.clamp(120.0, 320.0);
@@ -881,21 +882,21 @@ pub fn hud_touch_sticks(
                 p.text(
                     egui::pos2(rect.center().x, rect.top() - 12.0),
                     egui::Align2::CENTER_CENTER,
-                    "FLY",
+                    l10n::tr("FLY"),
                     egui::FontId::proportional(12.0),
                     Color32::from_rgb(255, 230, 140),
                 );
                 p.text(
                     egui::pos2(rect.center().x, rect.top() + 12.0),
                     egui::Align2::CENTER_CENTER,
-                    "UP",
+                    l10n::tr("UP"),
                     egui::FontId::proportional(11.0),
                     Color32::from_rgb(170, 230, 255),
                 );
                 p.text(
                     egui::pos2(rect.center().x, rect.bottom() - 12.0),
                     egui::Align2::CENTER_CENTER,
-                    "DOWN",
+                    l10n::tr("DOWN"),
                     egui::FontId::proportional(11.0),
                     Color32::from_rgb(195, 180, 255),
                 );
@@ -904,7 +905,7 @@ pub fn hud_touch_sticks(
                 egui::Area::new(Id::new("touch_land_button"))
                     .fixed_pos(land_button_pos)
                     .show(ui.ctx(), |ui| {
-                        if sfx_play(ui.add_sized([96.0, 32.0], egui::Button::new("LAND"))).clicked() {
+                        if sfx_play(ui.add_sized([96.0, 32.0], egui::Button::new(l10n::tr("LAND")))).clicked() {
                             if let Some(mut ctl) = query_controller.iter_mut().next() {
                                 ctl.is_flying = false;
                                 ctl.noclip_enabled = false;
@@ -1095,7 +1096,10 @@ pub fn hud_touch_sticks(
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(140, 200, 255, 180)))
                     .corner_radius(6.0)
                     .show(ui, |ui| {
-                        ui.colored_label(Color32::from_rgb(180, 220, 255), "Touch Layout Designer: drag joystick/buttons to reposition. Gameplay input is locked while editing.");
+                        ui.colored_label(
+                            Color32::from_rgb(180, 220, 255),
+                            l10n::tr("Touch Layout Designer: drag joystick/buttons to reposition. Gameplay input is locked while editing."),
+                        );
                     });
             });
     }

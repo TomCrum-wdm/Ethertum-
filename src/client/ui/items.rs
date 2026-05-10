@@ -2,6 +2,7 @@ use bevy::prelude::{Res, ResMut, Resource};
 use bevy_egui::egui::Painter;
 
 use crate::{
+    client::l10n,
     client::prelude::CurrentUI,
     item::{Inventory, ItemCategory, ItemStack, Items},
     net::{CPacket, RenetClientHelper},
@@ -52,11 +53,11 @@ impl InventoryOperation {
 
     pub fn label(self) -> &'static str {
         match self {
-            InventoryOperation::Place => "Place",
-            InventoryOperation::Mine => "Mine",
-            InventoryOperation::Weapon => "Weapon",
-            InventoryOperation::Food => "Food",
-            InventoryOperation::Inspect => "Inspect",
+            InventoryOperation::Place => l10n::tr("Place"),
+            InventoryOperation::Mine => l10n::tr("Mine"),
+            InventoryOperation::Weapon => l10n::tr("Weapon"),
+            InventoryOperation::Food => l10n::tr("Food"),
+            InventoryOperation::Inspect => l10n::tr("Inspect"),
         }
     }
 }
@@ -210,7 +211,7 @@ pub fn item_sort_key(items: &Items, item_id: u8) -> (u8, u8) {
 pub fn ui_item_stack(ui: &mut egui::Ui, slot: &mut ItemStack, slot_idx: usize, items: &Items, ui_state: &mut InventoryUiState) {
     let num_all_items = items.reg.len();
 
-    let slot_btn = egui::Button::new("").fill(Color32::from_black_alpha(100));
+    let slot_btn = egui::Button::new(l10n::tr("")).fill(Color32::from_black_alpha(100));
     // if cli.hotbar_index == i {
     //     slot = slot.stroke(Stroke::new(3., Color32::WHITE));
     // }
@@ -341,8 +342,8 @@ pub fn ui_inventory_operation_first(
     ui.columns(2, |cols| {
         cols[0].set_min_width(210.0);
         cols[0].vertical(|ui| {
-            ui.heading("Operations");
-            ui.small("Select operation(s) first, then pick matching items.");
+            ui.heading(l10n::tr("Operations"));
+            ui.small(l10n::tr("Select operation(s) first, then pick matching items."));
             ui.add_space(4.0);
 
             for op in InventoryOperation::ALL {
@@ -351,7 +352,7 @@ pub fn ui_inventory_operation_first(
                     vec_toggle(&mut ui_state.operation_filters, op, enabled);
                 }
                 if ui
-                    .selectable_label(ui_state.active_operation == op, format!("Active: {}", op.label()))
+                    .selectable_label(ui_state.active_operation == op, format!("{}: {}", l10n::tr("Active"), op.label()))
                     .clicked()
                 {
                     ui_state.active_operation = op;
@@ -363,7 +364,7 @@ pub fn ui_inventory_operation_first(
             }
 
             ui.separator();
-            ui.label(format!("Binding: {}", ui_state.active_operation.label()));
+            ui.label(format!("{}: {}", l10n::tr("Binding"), ui_state.active_operation.label()));
 
             let active = ui_state.active_operation;
             let mut b_left = ui_state.bind_left_click.contains(&active);
@@ -371,34 +372,34 @@ pub fn ui_inventory_operation_first(
             let mut b_short = ui_state.bind_short_press.contains(&active);
             let mut b_long = ui_state.bind_long_press.contains(&active);
 
-            if ui.checkbox(&mut b_left, "Left Click").changed() {
+            if ui.checkbox(&mut b_left, l10n::tr("Left Click")).changed() {
                 vec_toggle(&mut ui_state.bind_left_click, active, b_left);
             }
-            if ui.checkbox(&mut b_right, "Right Click").changed() {
+            if ui.checkbox(&mut b_right, l10n::tr("Right Click")).changed() {
                 vec_toggle(&mut ui_state.bind_right_click, active, b_right);
             }
-            if ui.checkbox(&mut b_short, "Short Press").changed() {
+            if ui.checkbox(&mut b_short, l10n::tr("Short Press")).changed() {
                 vec_toggle(&mut ui_state.bind_short_press, active, b_short);
             }
-            if ui.checkbox(&mut b_long, "Long Press").changed() {
+            if ui.checkbox(&mut b_long, l10n::tr("Long Press")).changed() {
                 vec_toggle(&mut ui_state.bind_long_press, active, b_long);
             }
 
             ui.separator();
             let selected_cnt = op_selected_items_ref(ui_state, active).len();
-            ui.label(format!("Selected items: {}", selected_cnt));
-            if ui.button("Clear Active Selection").clicked() {
+            ui.label(format!("{}: {}", l10n::tr("Selected items"), selected_cnt));
+            if ui.button(l10n::tr("Clear Active Selection")).clicked() {
                 op_selected_items_mut(ui_state, active).clear();
             }
         });
 
         cols[1].vertical(|ui| {
             let is_place = ui_state.active_operation == InventoryOperation::Place;
-            ui.heading(if is_place { "Place Catalog" } else { "Item Catalog" });
+            ui.heading(if is_place { l10n::tr("Place Catalog") } else { l10n::tr("Item Catalog") });
             ui.small(if is_place {
-                "Place uses voxel atlas contents, not the item atlas."
+                l10n::tr("Place uses voxel atlas contents, not the item atlas.")
             } else {
-                "Right side shows atlas-backed items first."
+                l10n::tr("Right side shows atlas-backed items first.")
             });
             ui.text_edit_singleline(&mut ui_state.catalog_search);
             ui.add_space(4.0);
@@ -457,7 +458,7 @@ pub fn ui_inventory_operation_first(
                         } else {
                             op_selected_items_ref(ui_state, ui_state.active_operation).contains(&item_u8)
                         };
-                        let slot_btn = egui::Button::new("").fill(if selected {
+                        let slot_btn = egui::Button::new(l10n::tr("")).fill(if selected {
                             Color32::from_rgba_premultiplied(120, 210, 255, 120)
                         } else {
                             Color32::from_black_alpha(90)
@@ -497,7 +498,7 @@ pub fn ui_inventory_operation_first(
             });
 
             ui.separator();
-            ui.label("Owned Inventory (authoritative swap)");
+            ui.label(l10n::tr("Owned Inventory (authoritative swap)"));
             ui_inventory(ui, inv, items, ui_state);
         });
     });

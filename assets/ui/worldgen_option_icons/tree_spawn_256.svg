@@ -1,0 +1,7 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+    <rect x="10" y="10" width="236" height="236" rx="42" fill="#111827"/>
+    <rect x="28" y="28" width="200" height="200" rx="28" stroke="#38BDF8" stroke-width="12"/>
+    <path d="M74 176 L128 86 L182 176" stroke="#93C5FD" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="128" cy="128" r="16" fill="#22D3EE"/>
+    <text x="128" y="222" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="44" fill="#E2E8F0">TS</text>
+</svg>
