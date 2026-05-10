@@ -85,6 +85,90 @@ pub fn ui_touch_tile_style_overlay(
                 cli.curr_ui = CurrentUI::MainMenu;
             }
 
+            let mut layout_changed = false;
+            egui::CollapsingHeader::new(l10n::tr("Main Menu Tile Layout"))
+                .default_open(false)
+                .show(ui, |ui| {
+                    let style = &mut cfg.main_menu_tile_style;
+                    layout_changed |= ui
+                        .checkbox(&mut style.main_tile_fill_width, l10n::tr("Fill Width"))
+                        .changed();
+                    layout_changed |= ui
+                        .checkbox(&mut style.main_tile_fill_height, l10n::tr("Fill Height"))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_target_w, 200.0..=640.0).text(l10n::tr("Main Tile Target Width")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_min_w_single, 160.0..=640.0).text(l10n::tr("Main Tile Min Width")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_gap_x, 0.0..=48.0).text(l10n::tr("Main Tile Gap X")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_gap_y, 0.0..=48.0).text(l10n::tr("Main Tile Gap Y")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_h_wide, 100.0..=320.0).text(l10n::tr("Main Tile Height Wide")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_h_med, 80.0..=320.0).text(l10n::tr("Main Tile Height Medium")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_h_narrow, 72.0..=320.0).text(l10n::tr("Main Tile Height Narrow")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_wide_threshold, 200.0..=640.0).text(l10n::tr("Wide Width Threshold")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_med_threshold, 160.0..=640.0).text(l10n::tr("Medium Width Threshold")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_pad_x_ratio, 0.0..=0.2).text(l10n::tr("Main Tile Padding X")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_pad_y_ratio, 0.0..=0.2).text(l10n::tr("Main Tile Padding Y")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_title_size, 12.0..=48.0).text(l10n::tr("Main Tile Title Size")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_subtitle_size, 10.0..=36.0).text(l10n::tr("Main Tile Subtitle Size")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_icon_br_size, 16.0..=96.0).text(l10n::tr("Main Tile Icon BR")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.main_tile_icon_bl_size, 16.0..=96.0).text(l10n::tr("Main Tile Icon BL")))
+                        .changed();
+                });
+            egui::CollapsingHeader::new(l10n::tr("Small Tile Layout"))
+                .default_open(false)
+                .show(ui, |ui| {
+                    let style = &mut cfg.main_menu_tile_style;
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_max_w, 120.0..=320.0).text(l10n::tr("Small Tile Max Width")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_h, 40.0..=120.0).text(l10n::tr("Small Tile Height")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_gap_x, 0.0..=24.0).text(l10n::tr("Small Tile Gap X")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_gap_y, 0.0..=24.0).text(l10n::tr("Small Tile Gap Y")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_icon_size, 16.0..=64.0).text(l10n::tr("Small Tile Icon Size")))
+                        .changed();
+                    layout_changed |= ui
+                        .add(egui::Slider::new(&mut style.small_tile_icon_margin, 0.0..=24.0).text(l10n::tr("Small Tile Icon Margin")))
+                        .changed();
+                });
+            if layout_changed {
+                cli.curr_ui = CurrentUI::MainMenu;
+            }
+
             ui.separator();
 
             // Window alpha slider
@@ -1589,6 +1673,31 @@ pub fn ui_settings(
                         ui.separator();
                         ui.label(l10n::tr("UI"));
                         ui_setting_line(ui, l10n::tr("HUD Padding"), egui::Slider::new(&mut cfg.hud_padding, 0.0..=48.0));
+                        ui_setting_line_custom(ui, l10n::tr("Resize Refresh Timing"), |ui| {
+                            let refresh_during = !cfg.suppress_interactive_resize_redraw;
+                            if ui.radio(refresh_during, l10n::tr("Refresh during drag")).clicked() {
+                                cfg.suppress_interactive_resize_redraw = false;
+                            }
+                            // Rename to 'Refresh after time' and allow configuring the debounce frames
+                            if ui.radio(!refresh_during, l10n::tr("Refresh after time")).clicked() {
+                                cfg.suppress_interactive_resize_redraw = true;
+                            }
+                            if cfg.suppress_interactive_resize_redraw {
+                                ui.horizontal(|ui| {
+                                    ui.label(l10n::tr("Debounce (frames):"));
+                                    ui.add(egui::DragValue::new(&mut cfg.interactive_resize_debounce_frames).clamp_range(0..=600));
+                                });
+                            }
+                        });
+                        ui_setting_line_custom(ui, l10n::tr("Resize Minigame"), |ui| {
+                            let is_ball = matches!(cfg.resize_minigame_mode, crate::client::settings::ResizeMinigameMode::Ball);
+                            if ui.radio(is_ball, l10n::tr("Bouncing Ball")).clicked() {
+                                cfg.resize_minigame_mode = crate::client::settings::ResizeMinigameMode::Ball;
+                            }
+                            if ui.radio(!is_ball, l10n::tr("Voxel DDA")).clicked() {
+                                cfg.resize_minigame_mode = crate::client::settings::ResizeMinigameMode::VoxelDda;
+                            }
+                        });
                         ui_setting_line(
                             ui,
                             l10n::tr("Touch Main Menu Tile Overlay"),

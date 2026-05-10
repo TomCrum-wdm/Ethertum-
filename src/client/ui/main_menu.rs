@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use crate::client::prelude::*;
 use crate::client::l10n;
 use crate::{client::client_world::ClientPlayerInfo, ui::prelude::*};
+use super::interactive_resize::InteractiveResizeState;
 
 thread_local! {
     static TOUCH_MENU_ICON_TEXTURES: std::cell::RefCell<HashMap<&'static str, egui::TextureId>> =
@@ -52,6 +53,101 @@ pub fn clear_touch_menu_caches(_images: &mut Assets<Image>) {
 
 const TOUCH_MENU_ICON_PX: u32 = 96;
 
+#[derive(Default)]
+pub(crate) struct MainMenuLayoutCache {
+    columns: usize,
+    tile_size: egui::Vec2,
+    platform_columns: usize,
+    info_columns: usize,
+    main_rows: usize,
+    small_reserved_height: f32,
+    valid: bool,
+}
+
+fn compute_main_menu_layout(
+    width: f32,
+    height: f32,
+    main_tiles_len: usize,
+    platform_tiles_len: usize,
+    info_tiles_len: usize,
+    style: &crate::client::settings::MainMenuTileStyle,
+) -> MainMenuLayoutCache {
+    let target_tile_w = style.main_tile_target_w;
+    let gap = style.main_tile_gap_x;
+    let max_columns = main_tiles_len.max(1);
+    let mut columns = ((width + gap) / (target_tile_w + gap)).floor() as usize;
+    if columns < 1 {
+        columns = 1;
+    } else if columns > max_columns {
+        columns = max_columns;
+    }
+
+    let platform_columns = if width > 1100.0 { 5 } else if width > 760.0 { 3 } else { 2 };
+    let info_columns = if width > 1100.0 { 5 } else if width > 760.0 { 3 } else { 2 };
+    let main_rows = (main_tiles_len + columns - 1) / columns;
+    let platform_rows = if platform_tiles_len == 0 {
+        0
+    } else {
+        (platform_tiles_len + platform_columns - 1) / platform_columns
+    };
+    let info_rows = if info_tiles_len == 0 {
+        0
+    } else {
+        (info_tiles_len + info_columns - 1) / info_columns
+    };
+
+    let tile_w = if style.main_tile_fill_width {
+        ((width - gap * (columns as f32 - 1.0)) / columns as f32).max(1.0)
+    } else if columns == 1 {
+        (width - 20.0).max(style.main_tile_min_w_single)
+    } else {
+        ((width - gap * (columns as f32 - 1.0)) / columns as f32).min(target_tile_w)
+    };
+
+    let platform_height = if platform_rows == 0 {
+        0.0
+    } else {
+        style.small_tile_h * platform_rows as f32
+            + style.small_tile_gap_y * (platform_rows.saturating_sub(1) as f32)
+    };
+    let info_height = if info_rows == 0 {
+        0.0
+    } else {
+        style.small_tile_h * info_rows as f32
+            + style.small_tile_gap_y * (info_rows.saturating_sub(1) as f32)
+    };
+    let reserved_height = platform_height + info_height;
+    let mut small_reserved_height = reserved_height;
+
+    let tile_h = if style.main_tile_fill_height {
+        let desired_main_height = height * 0.8;
+        let max_small_reserved = (height - desired_main_height).max(0.0);
+        if reserved_height > max_small_reserved {
+            small_reserved_height = max_small_reserved;
+        }
+        let available_main_height = (height - small_reserved_height).max(1.0);
+        let main_gap_height = style.main_tile_gap_y * (main_rows.saturating_sub(1) as f32);
+        ((available_main_height - main_gap_height) / main_rows.max(1) as f32).max(1.0)
+    } else if tile_w >= style.main_tile_wide_threshold {
+        style.main_tile_h_wide
+    } else if tile_w >= style.main_tile_med_threshold {
+        style.main_tile_h_med
+    } else {
+        style.main_tile_h_narrow
+    };
+    let tile_size = egui::vec2(tile_w, tile_h);
+
+    MainMenuLayoutCache {
+        columns,
+        tile_size,
+        platform_columns,
+        info_columns,
+        main_rows,
+        small_reserved_height,
+        valid: true,
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn rasterize_touch_menu_svg_to_image(icon_name: &str, target_px: u32) -> Option<Image> {
     use resvg::{tiny_skia, usvg};
@@ -60,9 +156,11 @@ fn rasterize_touch_menu_svg_to_image(icon_name: &str, target_px: u32) -> Option<
     let data = std::fs::read(path).ok()?;
 
     let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_data(&data, &opt).ok()?;
+    use usvg::TreeParsing;
 
-    let svg_size = tree.size();
+    let usvg_tree = usvg::Tree::from_data(&data, &opt).ok()?;
+
+    let svg_size = usvg_tree.size;
     let sx = target_px as f32 / svg_size.width();
     let sy = target_px as f32 / svg_size.height();
     let scale = sx.min(sy).max(0.001);
@@ -71,7 +169,8 @@ fn rasterize_touch_menu_svg_to_image(icon_name: &str, target_px: u32) -> Option<
     let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, tx, ty);
 
     let mut pixmap = tiny_skia::Pixmap::new(target_px, target_px)?;
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let rtree = resvg::Tree::from_usvg(&usvg_tree);
+    rtree.render(transform, &mut pixmap.as_mut());
 
     Some(Image::new_fill(
         Extent3d {
@@ -204,8 +303,10 @@ pub fn ui_main_menu(
     mut images: ResMut<Assets<Image>>,
     mut cli: ResMut<ClientInfo>,
     cfg: Res<ClientSettings>,
+    resize_state: Res<InteractiveResizeState>,
     mut copied_feedback: Local<f32>,
     time: Res<Time>,
+    mut layout_cache: Local<MainMenuLayoutCache>,
     // cmds: Commands,
     // mut dbg_server_addr: Local<String>,
 ) {
@@ -290,23 +391,6 @@ pub fn ui_main_menu(
 
             ui.add_space(20.0);
 
-            let width = ui.available_width();
-            let tile_size = if width > 1100.0 {
-                egui::vec2(320.0, 132.0)
-            } else if width > 760.0 {
-                egui::vec2(280.0, 124.0)
-            } else {
-                egui::vec2((width - 20.0).max(220.0), 112.0)
-            };
-
-            let columns = if width > 1100.0 {
-                3
-            } else if width > 760.0 {
-                2
-            } else {
-                1
-            };
-
             let main_tiles = [
                 (
                     l10n::tr("Singleplayer"),
@@ -346,19 +430,42 @@ pub fn ui_main_menu(
                 ),
             ];
 
+            let width = ui.available_width();
+            let height = ui.available_height();
+
+            if !layout_cache.valid || !resize_state.in_progress {
+                *layout_cache = compute_main_menu_layout(
+                    width,
+                    height,
+                    main_tiles.len(),
+                    platform_tiles.len(),
+                    info_tiles.len(),
+                    &cfg.main_menu_tile_style,
+                );
+            }
+
+            let tile_size = layout_cache.tile_size;
+            let columns = layout_cache.columns.max(1);
+            let main_rows = layout_cache.main_rows.max(1);
+            let platform_columns = layout_cache.platform_columns.max(1);
+            let info_columns = layout_cache.info_columns.max(1);
+
             ui.vertical_centered(|ui| {
-                egui::Grid::new("touch_main_menu_tiles")
-                    .num_columns(columns)
-                    .spacing([14.0, 14.0])
-                    .striped(false)
-                    .show(ui, |ui| {
-                        for (idx, (title, subtitle, target_ui, is_exit, icon_texture_id, bg_texture_id, icon_bottom_right)) in
-                            main_tiles.iter().enumerate()
-                        {
+                let row_count = (main_tiles.len() + columns - 1) / columns;
+                for row in 0..row_count {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(cfg.main_menu_tile_style.main_tile_gap_x, 0.0);
+                        for col in 0..columns {
+                            let idx = row * columns + col;
+                            if idx >= main_tiles.len() {
+                                break;
+                            }
+                            let (title, subtitle, target_ui, is_exit, icon_texture_id, bg_texture_id, icon_bottom_right) =
+                                &main_tiles[idx];
                             let (rect, response) = ui.allocate_exact_size(tile_size, egui::Sense::click());
                             let visuals = ui.style().interact(&response);
 
-                            ui.painter().rect_filled(rect, 12.0, visuals.bg_fill);
+                            ui.painter().rect_filled(rect, 0.0, visuals.bg_fill);
 
                             if let Some(bg) = *bg_texture_id {
                                 // Try to find the original image handle/name so we can read its pixel size
@@ -384,30 +491,57 @@ pub fn ui_main_menu(
 
                                 ui.painter().image(bg, rect, uv, egui::Color32::WHITE);
                                 let alpha = (cfg.touch_menu_tile_overlay_strength * 255.0).round() as u8;
-                                ui.painter().rect_filled(rect, 12.0, egui::Color32::from_black_alpha(alpha));
+                                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_black_alpha(alpha));
                             }
 
-                            let title_pos = rect.left_top() + egui::vec2(16.0, 14.0);
-                            let subtitle_pos = rect.left_top() + egui::vec2(16.0, 50.0);
-                            ui.painter().text(
-                                title_pos,
-                                egui::Align2::LEFT_TOP,
-                                title,
-                                egui::FontId::proportional(26.0),
-                                egui::Color32::WHITE,
+                            let margin_x = tile_size.x * cfg.main_menu_tile_style.main_tile_pad_x_ratio;
+                            let margin_y = tile_size.y * cfg.main_menu_tile_style.main_tile_pad_y_ratio;
+                            let content_rect = rect.shrink2(egui::vec2(margin_x, margin_y));
+                            let mut text_ui = ui.child_ui(
+                                content_rect,
+                                egui::Layout::top_down(egui::Align::Min),
+                                None,
                             );
-                            ui.painter().text(
-                                subtitle_pos,
-                                egui::Align2::LEFT_TOP,
-                                subtitle,
-                                egui::FontId::proportional(18.0),
-                                egui::Color32::from_white_alpha(230),
+                            text_ui.set_width(content_rect.width());
+                            text_ui.set_height(content_rect.height());
+                            text_ui.spacing_mut().item_spacing = egui::vec2(4.0, 6.0);
+
+                            let title_size = cfg.main_menu_tile_style.main_tile_title_size;
+                            let subtitle_size = cfg.main_menu_tile_style.main_tile_subtitle_size;
+                            let title_line = title_size * 1.25;
+                            let subtitle_line = subtitle_size * 1.25;
+                            let max_text_h = content_rect.height().max(1.0);
+                            let title_h = (max_text_h * 0.55).max(title_line).min(max_text_h);
+                            let subtitle_h = (max_text_h - title_h).max(subtitle_line).min(max_text_h);
+
+                            text_ui.add_sized(
+                                [content_rect.width(), title_h],
+                                egui::Label::new(
+                                    RichText::new(*title)
+                                        .size(title_size)
+                                        .color(Color32::WHITE),
+                                )
+                                .wrap()
+                                .selectable(false),
+                            );
+                            text_ui.add_sized(
+                                [content_rect.width(), subtitle_h],
+                                egui::Label::new(
+                                    RichText::new(*subtitle)
+                                        .size(subtitle_size)
+                                        .color(egui::Color32::from_white_alpha(230)),
+                                )
+                                .wrap()
+                                .selectable(false),
                             );
 
                             if let Some(icon) = *icon_texture_id {
                                 if *icon_bottom_right {
-                                    let size = egui::vec2(42.0, 42.0);
-                                    let min = rect.right_bottom() - size - egui::vec2(10.0, 10.0);
+                                    let size = egui::vec2(
+                                        cfg.main_menu_tile_style.main_tile_icon_br_size,
+                                        cfg.main_menu_tile_style.main_tile_icon_br_size,
+                                    );
+                                    let min = content_rect.right_bottom() - size;
                                     let icon_rect = egui::Rect::from_min_size(min, size);
                                     ui.painter().image(
                                         icon,
@@ -416,8 +550,11 @@ pub fn ui_main_menu(
                                         egui::Color32::WHITE,
                                     );
                                 } else {
-                                    let size = egui::vec2(36.0, 36.0);
-                                    let min = rect.left_bottom() - egui::vec2(0.0, size.y + 10.0) + egui::vec2(16.0, 0.0);
+                                    let size = egui::vec2(
+                                        cfg.main_menu_tile_style.main_tile_icon_bl_size,
+                                        cfg.main_menu_tile_style.main_tile_icon_bl_size,
+                                    );
+                                    let min = content_rect.left_bottom() - egui::vec2(0.0, size.y);
                                     let icon_rect = egui::Rect::from_min_size(min, size);
                                     ui.painter().image(
                                         icon,
@@ -435,120 +572,158 @@ pub fn ui_main_menu(
                                     cli.curr_ui = target_ui.clone();
                                 }
                             }
-
-                            if (idx + 1) % columns == 0 {
-                                ui.end_row();
-                            }
                         }
                     });
+                    if row + 1 < row_count {
+                        ui.add_space(cfg.main_menu_tile_style.main_tile_gap_y);
+                    }
+                }
 
-                // 平台类磁贴区
-                let platform_tile_size = egui::vec2(tile_size.x.min(180.0), 64.0);
-                let platform_columns = if width > 1100.0 { 5 } else if width > 760.0 { 3 } else { 2 };
-                egui::Grid::new("touch_main_menu_platform_tiles")
-                    .num_columns(platform_columns)
-                    .spacing([10.0, 10.0])
-                    .striped(false)
-                    .show(ui, |ui| {
-                        for (idx, (title, subtitle, _url, icon_svg)) in platform_tiles.iter().enumerate() {
-                            let (rect, response) = ui.allocate_exact_size(platform_tile_size, egui::Sense::click());
-                            let visuals = ui.style().interact(&response);
-                            // 底图（已预加载）
-                            if let Some(tex) = platform_bg_tex {
-                                ui.painter().image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
-                            } else {
-                                ui.painter().rect_filled(rect, 10.0, egui::Color32::from_rgb(40, 60, 120));
-                            }
-                            // 图标区域
-                            let icon_rect = egui::Rect::from_min_size(rect.left_top() + egui::vec2(10.0, 10.0), egui::vec2(36.0, 36.0));
-                            let icon_tex = platform_icon_textures.get(idx).and_then(|v| *v);
-                            if let Some(tex) = icon_tex {
-                                ui.painter().image(tex, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
-                            } else {
-                                ui.painter().rect_filled(icon_rect, 6.0, egui::Color32::from_rgb(180, 200, 255));
-                            }
-                            // 标题/副标题
-                            let title_pos = rect.left_top() + egui::vec2(56.0, 12.0);
-                            let subtitle_pos = rect.left_top() + egui::vec2(56.0, 34.0);
-                            ui.painter().text(
-                                title_pos,
-                                egui::Align2::LEFT_TOP,
-                                *title,
-                                egui::FontId::proportional(18.0),
-                                egui::Color32::WHITE,
-                            );
-                            ui.painter().text(
-                                subtitle_pos,
-                                egui::Align2::LEFT_TOP,
-                                *subtitle,
-                                egui::FontId::proportional(13.0),
-                                egui::Color32::from_white_alpha(210),
-                            );
-                            // 点击事件预留
-                            if response.clicked() {
-                                // 可扩展
-                            }
-                            if (idx + 1) % platform_columns == 0 {
-                                ui.end_row();
-                            }
-                        }
-                    });
+                let main_area_height = tile_size.y * main_rows as f32
+                    + cfg.main_menu_tile_style.main_tile_gap_y * (main_rows.saturating_sub(1) as f32);
+                let remaining_height = (height - main_area_height).max(1.0);
 
-                // 信息类磁贴区
-                let info_tile_size = egui::vec2(tile_size.x.min(180.0), 64.0);
-                let info_columns = if width > 1100.0 { 5 } else if width > 760.0 { 3 } else { 2 };
-                egui::Grid::new("touch_main_menu_info_tiles")
-                    .num_columns(info_columns)
-                    .spacing([10.0, 10.0])
-                    .striped(false)
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .max_height(remaining_height)
                     .show(ui, |ui| {
-                        for (idx, (title, subtitle, url, icon_svg)) in info_tiles.iter().enumerate() {
-                            let (rect, response) = ui.allocate_exact_size(info_tile_size, egui::Sense::click());
-                            let visuals = ui.style().interact(&response);
-                            // 底图（已预加载）
-                            if let Some(tex) = info_bg_tex {
-                                ui.painter().image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
-                            } else {
-                                ui.painter().rect_filled(rect, 10.0, egui::Color32::from_rgb(60, 80, 60));
-                            }
-                            // 图标区域
-                            let icon_rect = egui::Rect::from_min_size(rect.left_top() + egui::vec2(10.0, 10.0), egui::vec2(36.0, 36.0));
-                            let icon_tex = info_icon_textures.get(idx).and_then(|v| *v);
-                            if let Some(tex) = icon_tex {
-                                ui.painter().image(tex, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
-                            } else {
-                                ui.painter().rect_filled(icon_rect, 6.0, egui::Color32::from_rgb(200, 220, 180));
-                            }
-                            let title_pos = rect.left_top() + egui::vec2(56.0, 12.0);
-                            let subtitle_pos = rect.left_top() + egui::vec2(56.0, 34.0);
-                            ui.painter().text(
-                                title_pos,
-                                egui::Align2::LEFT_TOP,
-                                *title,
-                                egui::FontId::proportional(18.0),
-                                egui::Color32::WHITE,
-                            );
-                            ui.painter().text(
-                                subtitle_pos,
-                                egui::Align2::LEFT_TOP,
-                                *subtitle,
-                                egui::FontId::proportional(13.0),
-                                egui::Color32::from_white_alpha(210),
-                            );
-                            if response.clicked() {
-                                if let Some(url) = url {
-                                    ui.ctx().open_url(OpenUrl::new_tab(url));
-                                } else if *title == "诊断" {
-                                    let report = build_startup_diagnostic_report(&cli, &cfg);
-                                    ui.ctx().copy_text(report);
-                                } else if *title == "模组" {
-                                    // 未来可弹出模组列表
+                        let platform_tile_size = egui::vec2(
+                            tile_size.x.min(cfg.main_menu_tile_style.small_tile_max_w),
+                            cfg.main_menu_tile_style.small_tile_h,
+                        );
+                        egui::Grid::new("touch_main_menu_platform_tiles")
+                            .num_columns(platform_columns)
+                            .spacing([
+                                cfg.main_menu_tile_style.small_tile_gap_x,
+                                cfg.main_menu_tile_style.small_tile_gap_y,
+                            ])
+                            .striped(false)
+                            .show(ui, |ui| {
+                                for (idx, (title, subtitle, _url, _icon_svg)) in platform_tiles.iter().enumerate() {
+                                    let (rect, response) = ui.allocate_exact_size(platform_tile_size, egui::Sense::click());
+                                    let visuals = ui.style().interact(&response);
+                                    // 底图（已预加载）
+                                    if let Some(tex) = platform_bg_tex {
+                                        ui.painter().image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                                    } else {
+                                        ui.painter().rect_filled(rect, 10.0, egui::Color32::from_rgb(40, 60, 120));
+                                    }
+                                    // 图标区域
+                                    let icon_rect = egui::Rect::from_min_size(
+                                        rect.left_top()
+                                            + egui::vec2(
+                                                cfg.main_menu_tile_style.small_tile_icon_margin,
+                                                cfg.main_menu_tile_style.small_tile_icon_margin,
+                                            ),
+                                        egui::vec2(
+                                            cfg.main_menu_tile_style.small_tile_icon_size,
+                                            cfg.main_menu_tile_style.small_tile_icon_size,
+                                        ),
+                                    );
+                                    let icon_tex = platform_icon_textures.get(idx).and_then(|v| *v);
+                                    if let Some(tex) = icon_tex {
+                                        ui.painter().image(tex, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                                    } else {
+                                        ui.painter().rect_filled(icon_rect, 6.0, egui::Color32::from_rgb(180, 200, 255));
+                                    }
+                                    // 标题/副标题
+                                    let title_pos = rect.left_top() + egui::vec2(56.0, 12.0);
+                                    let subtitle_pos = rect.left_top() + egui::vec2(56.0, 34.0);
+                                    ui.painter().text(
+                                        title_pos,
+                                        egui::Align2::LEFT_TOP,
+                                        *title,
+                                        egui::FontId::proportional(18.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                    ui.painter().text(
+                                        subtitle_pos,
+                                        egui::Align2::LEFT_TOP,
+                                        *subtitle,
+                                        egui::FontId::proportional(13.0),
+                                        egui::Color32::from_white_alpha(210),
+                                    );
+                                    // 点击事件预留
+                                    if response.clicked() {
+                                        // 可扩展
+                                    }
+                                    if (idx + 1) % platform_columns == 0 {
+                                        ui.end_row();
+                                    }
                                 }
-                            }
-                            if (idx + 1) % info_columns == 0 {
-                                ui.end_row();
-                            }
-                        }
+                            });
+
+                        // 信息类磁贴区
+                        let info_tile_size = egui::vec2(
+                            tile_size.x.min(cfg.main_menu_tile_style.small_tile_max_w),
+                            cfg.main_menu_tile_style.small_tile_h,
+                        );
+                        egui::Grid::new("touch_main_menu_info_tiles")
+                            .num_columns(info_columns)
+                            .spacing([
+                                cfg.main_menu_tile_style.small_tile_gap_x,
+                                cfg.main_menu_tile_style.small_tile_gap_y,
+                            ])
+                            .striped(false)
+                            .show(ui, |ui| {
+                                for (idx, (title, subtitle, url, _icon_svg)) in info_tiles.iter().enumerate() {
+                                    let (rect, response) = ui.allocate_exact_size(info_tile_size, egui::Sense::click());
+                                    let visuals = ui.style().interact(&response);
+                                    // 底图（已预加载）
+                                    if let Some(tex) = info_bg_tex {
+                                        ui.painter().image(tex, rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                                    } else {
+                                        ui.painter().rect_filled(rect, 10.0, egui::Color32::from_rgb(60, 80, 60));
+                                    }
+                                    // 图标区域
+                                    let icon_rect = egui::Rect::from_min_size(
+                                        rect.left_top()
+                                            + egui::vec2(
+                                                cfg.main_menu_tile_style.small_tile_icon_margin,
+                                                cfg.main_menu_tile_style.small_tile_icon_margin,
+                                            ),
+                                        egui::vec2(
+                                            cfg.main_menu_tile_style.small_tile_icon_size,
+                                            cfg.main_menu_tile_style.small_tile_icon_size,
+                                        ),
+                                    );
+                                    let icon_tex = info_icon_textures.get(idx).and_then(|v| *v);
+                                    if let Some(tex) = icon_tex {
+                                        ui.painter().image(tex, icon_rect, egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)), egui::Color32::WHITE);
+                                    } else {
+                                        ui.painter().rect_filled(icon_rect, 6.0, egui::Color32::from_rgb(200, 220, 180));
+                                    }
+                                    let title_pos = rect.left_top() + egui::vec2(56.0, 12.0);
+                                    let subtitle_pos = rect.left_top() + egui::vec2(56.0, 34.0);
+                                    ui.painter().text(
+                                        title_pos,
+                                        egui::Align2::LEFT_TOP,
+                                        *title,
+                                        egui::FontId::proportional(18.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                    ui.painter().text(
+                                        subtitle_pos,
+                                        egui::Align2::LEFT_TOP,
+                                        *subtitle,
+                                        egui::FontId::proportional(13.0),
+                                        egui::Color32::from_white_alpha(210),
+                                    );
+                                    if response.clicked() {
+                                        if let Some(url) = url {
+                                            ui.ctx().open_url(OpenUrl::new_tab(url));
+                                        } else if *title == "诊断" {
+                                            let report = build_startup_diagnostic_report(&cli, &cfg);
+                                            ui.ctx().copy_text(report);
+                                        } else if *title == "模组" {
+                                            // 未来可弹出模组列表
+                                        }
+                                    }
+                                    if (idx + 1) % info_columns == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
                     });
             });
         });

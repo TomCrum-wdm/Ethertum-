@@ -88,6 +88,100 @@ pub enum TouchActionBinding {
     Sneak,
 }
 
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub enum ResizeMinigameMode {
+    Ball,
+    VoxelDda,
+}
+
+impl Default for ResizeMinigameMode {
+    fn default() -> Self {
+        ResizeMinigameMode::Ball
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, PartialEq, Reflect)]
+#[serde(default)]
+#[reflect(Default)]
+pub struct MainMenuTileStyle {
+    /// When true, tile width expands to fully fill the available row width.
+    pub main_tile_fill_width: bool,
+    /// When true, tile height expands to fill remaining vertical space.
+    pub main_tile_fill_height: bool,
+    /// Ideal tile width used to derive columns from the panel width.
+    pub main_tile_target_w: f32,
+    /// Minimum width when only one column fits.
+    pub main_tile_min_w_single: f32,
+    /// Horizontal spacing between large tiles.
+    pub main_tile_gap_x: f32,
+    /// Vertical spacing between large tiles.
+    pub main_tile_gap_y: f32,
+    /// Height when tile width >= main_tile_wide_threshold.
+    pub main_tile_h_wide: f32,
+    /// Height when tile width >= main_tile_med_threshold.
+    pub main_tile_h_med: f32,
+    /// Height when tile width < main_tile_med_threshold.
+    pub main_tile_h_narrow: f32,
+    /// Width threshold for main_tile_h_wide.
+    pub main_tile_wide_threshold: f32,
+    /// Width threshold for main_tile_h_med.
+    pub main_tile_med_threshold: f32,
+    /// Per-side horizontal padding ratio; total padding ~= 2% when set to 0.01.
+    pub main_tile_pad_x_ratio: f32,
+    /// Per-side vertical padding ratio; total padding ~= 16% when set to 0.08.
+    pub main_tile_pad_y_ratio: f32,
+    /// Title font size.
+    pub main_tile_title_size: f32,
+    /// Subtitle font size.
+    pub main_tile_subtitle_size: f32,
+    /// Bottom-right icon size.
+    pub main_tile_icon_br_size: f32,
+    /// Bottom-left icon size.
+    pub main_tile_icon_bl_size: f32,
+    /// Max width for small tiles; height is fixed.
+    pub small_tile_max_w: f32,
+    /// Height for small tiles.
+    pub small_tile_h: f32,
+    /// Horizontal spacing between small tiles.
+    pub small_tile_gap_x: f32,
+    /// Vertical spacing between small tiles.
+    pub small_tile_gap_y: f32,
+    /// Icon size in small tiles.
+    pub small_tile_icon_size: f32,
+    /// Icon margin from the tile edge.
+    pub small_tile_icon_margin: f32,
+}
+
+impl Default for MainMenuTileStyle {
+    fn default() -> Self {
+        Self {
+            main_tile_fill_width: false,
+            main_tile_fill_height: false,
+            main_tile_target_w: 320.0,
+            main_tile_min_w_single: 220.0,
+            main_tile_gap_x: 14.0,
+            main_tile_gap_y: 14.0,
+            main_tile_h_wide: 170.0,
+            main_tile_h_med: 156.0,
+            main_tile_h_narrow: 144.0,
+            main_tile_wide_threshold: 320.0,
+            main_tile_med_threshold: 280.0,
+            main_tile_pad_x_ratio: 0.01,
+            main_tile_pad_y_ratio: 0.08,
+            main_tile_title_size: 26.0,
+            main_tile_subtitle_size: 18.0,
+            main_tile_icon_br_size: 42.0,
+            main_tile_icon_bl_size: 36.0,
+            small_tile_max_w: 180.0,
+            small_tile_h: 64.0,
+            small_tile_gap_x: 10.0,
+            small_tile_gap_y: 10.0,
+            small_tile_icon_size: 36.0,
+            small_tile_icon_margin: 10.0,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct TouchControlsConfig {
@@ -261,10 +355,18 @@ pub struct ClientSettings {
     pub username: String,
     pub hud_padding: f32,
     pub vsync: bool,
+    /// When true, request the windowing backend to avoid continuous redraw
+    /// during interactive resizing. Default: true.
+    pub suppress_interactive_resize_redraw: bool,
+    /// Number of frames to wait since last resize event before considering
+    /// the interactive resize finished. Used when `suppress_interactive_resize_redraw` is true.
+    pub interactive_resize_debounce_frames: u32,
+    pub resize_minigame_mode: ResizeMinigameMode,
     pub high_quality_rendering: bool,
     pub touch_ui: bool,
     pub touch_menu_tile_overlay_strength: f32,
     pub touch_tile_style: TouchTileStyle,
+    pub main_menu_tile_style: MainMenuTileStyle,
     pub touch_tile_style_overlay_enabled: bool,
     pub touch_tile_style_window_alpha: f32,
     pub show_level_indicator: bool,
@@ -302,10 +404,14 @@ impl Default for ClientSettings {
             username: crate::util::generate_simple_user_name(),
             hud_padding: 24.,
             vsync: true,
+            suppress_interactive_resize_redraw: true,
+            interactive_resize_debounce_frames: 3,
+            resize_minigame_mode: ResizeMinigameMode::Ball,
             high_quality_rendering: true,
             touch_ui: true,
             touch_menu_tile_overlay_strength: 0.38,
             touch_tile_style: TouchTileStyle::default(),
+            main_menu_tile_style: MainMenuTileStyle::default(),
             touch_tile_style_overlay_enabled: false,
             touch_tile_style_window_alpha: 0.9,
             show_level_indicator: true,
@@ -342,6 +448,29 @@ impl ClientSettings {
 
         self.touch_tile_style_window_alpha = self.touch_tile_style_window_alpha.clamp(0.0, 1.0);
 
+        let s = &mut self.main_menu_tile_style;
+        s.main_tile_target_w = s.main_tile_target_w.clamp(200.0, 640.0);
+        s.main_tile_min_w_single = s.main_tile_min_w_single.clamp(160.0, 640.0).min(s.main_tile_target_w);
+        s.main_tile_gap_x = s.main_tile_gap_x.clamp(0.0, 48.0);
+        s.main_tile_gap_y = s.main_tile_gap_y.clamp(0.0, 48.0);
+        s.main_tile_h_wide = s.main_tile_h_wide.clamp(100.0, 320.0);
+        s.main_tile_h_med = s.main_tile_h_med.clamp(80.0, 320.0).min(s.main_tile_h_wide);
+        s.main_tile_h_narrow = s.main_tile_h_narrow.clamp(72.0, 320.0).min(s.main_tile_h_med);
+        s.main_tile_wide_threshold = s.main_tile_wide_threshold.clamp(200.0, 640.0);
+        s.main_tile_med_threshold = s.main_tile_med_threshold.clamp(160.0, 640.0).min(s.main_tile_wide_threshold);
+        s.main_tile_pad_x_ratio = s.main_tile_pad_x_ratio.clamp(0.0, 0.2);
+        s.main_tile_pad_y_ratio = s.main_tile_pad_y_ratio.clamp(0.0, 0.2);
+        s.main_tile_title_size = s.main_tile_title_size.clamp(12.0, 48.0);
+        s.main_tile_subtitle_size = s.main_tile_subtitle_size.clamp(10.0, 36.0).min(s.main_tile_title_size);
+        s.main_tile_icon_br_size = s.main_tile_icon_br_size.clamp(16.0, 96.0);
+        s.main_tile_icon_bl_size = s.main_tile_icon_bl_size.clamp(16.0, 96.0);
+        s.small_tile_max_w = s.small_tile_max_w.clamp(120.0, 320.0);
+        s.small_tile_h = s.small_tile_h.clamp(40.0, 120.0);
+        s.small_tile_gap_x = s.small_tile_gap_x.clamp(0.0, 24.0);
+        s.small_tile_gap_y = s.small_tile_gap_y.clamp(0.0, 24.0);
+        s.small_tile_icon_size = s.small_tile_icon_size.clamp(16.0, 64.0);
+        s.small_tile_icon_margin = s.small_tile_icon_margin.clamp(0.0, 24.0);
+
         self.chunks_load_distance.x = self.chunks_load_distance.x.max(2);
         self.chunks_load_distance.y = self.chunks_load_distance.y.max(1);
 
@@ -355,6 +484,10 @@ impl ClientSettings {
         self.gpu_worldgen_adaptive_mult_high = self.gpu_worldgen_adaptive_mult_high.max(self.gpu_worldgen_adaptive_mult_mid);
         self.gpu_worldgen_adaptive_batch_min = self.gpu_worldgen_adaptive_batch_min.max(1);
         self.gpu_worldgen_adaptive_batch_max = self.gpu_worldgen_adaptive_batch_max.max(self.gpu_worldgen_adaptive_batch_min);
+        // Clamp interactive resize debounce to reasonable range
+        if self.interactive_resize_debounce_frames > 600 {
+            self.interactive_resize_debounce_frames = 600;
+        }
     }
 }
 

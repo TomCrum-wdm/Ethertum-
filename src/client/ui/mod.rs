@@ -1,7 +1,9 @@
 mod debug;
 pub mod hud;
+mod interactive_resize;
 mod items;
 mod main_menu;
+mod resize_minigame;
 pub mod serverlist;
 mod settings;
 
@@ -49,6 +51,9 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiState>();
         app.init_resource::<items::InventoryUiState>();
+        app.init_resource::<interactive_resize::FrameIndex>();
+        app.init_resource::<interactive_resize::InteractiveResizeState>();
+        app.init_resource::<resize_minigame::ResizeMinigameState>();
         app.insert_resource(hud::ChatHistory::default());
         if !app.is_plugin_added::<EguiPlugin>() {
             app.add_plugins(EguiPlugin::default());
@@ -65,6 +70,10 @@ impl Plugin for UiPlugin {
                 (configure_visuals_system, configure_ui_state_system, init_ui_scale_factor_system),
             )
             .add_systems(PreUpdate, sync_ui_window_metrics_system)
+            .add_systems(
+                PreUpdate,
+                (interactive_resize::update_frame_index_system, interactive_resize::update_resize_state_system).chain(),
+            )
             .add_systems(Update, ensure_world_camera_system.run_if(condition::in_world))
             .add_systems(Update, sync_camera_render_effects_system)
             .add_systems(Update, sync_l10n_language_system)
@@ -95,6 +104,10 @@ impl Plugin for UiPlugin {
                         .run_if(condition::in_world)
                         .run_if(|cli: Res<ClientInfo>| cli.curr_ui != CurrentUI::WorldEditor),
                     items::draw_ui_holding_item,
+                    resize_minigame::resize_minigame_system
+                        .run_if(|cfg: Res<ClientSettings>, resize: Res<interactive_resize::InteractiveResizeState>| {
+                            cfg.suppress_interactive_resize_redraw && resize.in_progress
+                        }),
                     /* menu */
                     (
                         settings::ui_settings.run_if(condition::in_ui(CurrentUI::Settings)),
@@ -108,6 +121,9 @@ impl Plugin for UiPlugin {
                         //serverlist::ui_connecting_server.run_if(condition::in_ui(CurrentUI::ConnectingServer)),
                         serverlist::ui_disconnected_reason.run_if(condition::in_ui(CurrentUI::DisconnectedReason)),
                     )
+                        .run_if(|cfg: Res<ClientSettings>, resize: Res<interactive_resize::InteractiveResizeState>| {
+                            !(cfg.suppress_interactive_resize_redraw && resize.in_progress)
+                        })
                 ),
             );
         }
@@ -217,12 +233,6 @@ pub fn set_window_size(size: Vec2) {
     if let Ok(mut v) = UI_WINDOW_SIZE.lock() {
         *v = size;
     }
-}
-
-#[derive(Default)]
-struct WindowResizeTracker {
-    resizing: bool,
-    last_size: Option<Vec2>,
 }
 
 pub fn set_ui_safe_top(v: f32) {
@@ -782,52 +792,15 @@ fn init_ui_scale_factor_system(
     egui_settings.scale_factor = if cfg!(target_os = "android") { 1.2 } else { 1.0 };
 }
 
-fn sync_ui_window_metrics_system(
-    mut resize_start: EventReader<bevy::window::WindowResizeStart>,
-    mut resize_events: EventReader<bevy::window::WindowResized>,
-    mut resize_end: EventReader<bevy::window::WindowResizeEnd>,
-    query_window: Query<&Window, With<PrimaryWindow>>,
-    mut tracker: Local<WindowResizeTracker>,
-) {
-    // On resize start: enter resize/drag mode and clear pending size.
-    if resize_start.iter().next().is_some() {
-        tracker.resizing = true;
-        tracker.last_size = None;
-    }
+fn sync_ui_window_metrics_system(query_window: Query<&Window, With<PrimaryWindow>>) {
+    let Ok(window) = query_window.single() else {
+        return;
+    };
 
-    // Process WindowResized events: if currently resizing, remember the last size
-    // but do not call `set_window_size`. If not resizing, update immediately.
-    for _ev in resize_events.iter() {
-        if let Ok(window) = query_window.single() {
-            let size = Vec2::new(window.resolution.width(), window.resolution.height());
-            if tracker.resizing {
-                tracker.last_size = Some(size);
-            } else {
-                set_window_size(size);
-                if cfg!(target_os = "android") {
-                    let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
-                    set_ui_safe_top(safe_top);
-                }
-            }
-        }
-    }
-
-    // On resize end: apply the last seen size (if any) once and leave resize mode.
-    if resize_end.iter().next().is_some() {
-        let final_size = tracker.last_size.or_else(|| {
-            query_window.single().ok().map(|w| Vec2::new(w.resolution.width(), w.resolution.height()))
-        });
-        if let Some(size) = final_size {
-            set_window_size(size);
-            if cfg!(target_os = "android") {
-                if let Ok(window) = query_window.single() {
-                    let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
-                    set_ui_safe_top(safe_top);
-                }
-            }
-        }
-        tracker.resizing = false;
-        tracker.last_size = None;
+    set_window_size(Vec2::new(window.resolution.width(), window.resolution.height()));
+    if cfg!(target_os = "android") {
+        let safe_top = (window.resolution.height() * 0.045).clamp(32.0, 72.0);
+        set_ui_safe_top(safe_top);
     }
 }
 

@@ -146,14 +146,15 @@ fn icon_target_raster_px(icon_size_ui: f32, pixels_per_point: f32) -> u32 {
 #[cfg(not(target_arch = "wasm32"))]
 fn rasterize_option_svg_to_image(label: &str, target_px: u32) -> Option<Image> {
     use resvg::{tiny_skia, usvg};
+    use usvg::TreeParsing;
 
     let path = option_icon_svg_disk_path(label);
     let data = std::fs::read(path).ok()?;
 
     let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_data(&data, &opt).ok()?;
+    let usvg_tree = usvg::Tree::from_data(&data, &opt).ok()?;
 
-    let svg_size = tree.size();
+    let svg_size = usvg_tree.size;
     let sx = target_px as f32 / svg_size.width();
     let sy = target_px as f32 / svg_size.height();
     let scale = sx.min(sy).max(0.001);
@@ -162,7 +163,8 @@ fn rasterize_option_svg_to_image(label: &str, target_px: u32) -> Option<Image> {
     let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, tx, ty);
 
     let mut pixmap = tiny_skia::Pixmap::new(target_px, target_px)?;
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let rtree = resvg::Tree::from_usvg(&usvg_tree);
+    rtree.render(transform, &mut pixmap.as_mut());
 
     Some(Image::new_fill(
         Extent3d {
